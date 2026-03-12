@@ -4,7 +4,7 @@ esquema FacturaElectrónica v4.3 del Ministerio de Hacienda de Costa Rica.
 
 Referencia: https://www.hacienda.go.cr/ATV/ComprobanteElectronico/docs/
 """
-from xml import etree
+from lxml import etree
 from datetime import datetime
 from decimal import Decimal
 
@@ -13,9 +13,9 @@ NAMESPACE = "https://cdn.comprobanteselectronicos.go.cr/xml-schemas/v4.3/factura
 XSD_URI = "https://cdn.comprobanteselectronicos.go.cr/xml-schemas/v4.3/facturaElectronica FacturaElectronicaV4.3.xsd"
 
 
-def _elem(parent: .etree._Element, tag: str, text: str = None, **attrs) -> .etree._Element:
+def _elem(parent: etree._Element, tag: str, text: str = None, **attrs) -> etree._Element:
     """Helper para crear elementos XML con namespace."""
-    el = .etree.SubElement(parent, f"{{{NAMESPACE}}}{tag}", **attrs)
+    el = etree.SubElement(parent, f"{{{NAMESPACE}}}{tag}", **attrs)
     if text is not None:
         el.text = str(text)
     return el
