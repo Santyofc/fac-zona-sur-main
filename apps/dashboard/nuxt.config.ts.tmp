@@ -8,9 +8,14 @@ export default defineNuxtConfig({
     "@nuxtjs/tailwindcss",
   ],
 
+  postcss: {
+    plugins: {
+      "@tailwindcss/postcss": {},
+      autoprefixer: {},
+    },
+  },
+
   supabase: {
-    url: process.env.NUXT_PUBLIC_SUPABASE_URL,
-    key: process.env.NUXT_PUBLIC_SUPABASE_KEY,
     redirect: false,
   },
 
@@ -20,7 +25,7 @@ export default defineNuxtConfig({
 
   runtimeConfig: {
     public: {
-      apiBase: process.env.NUXT_PUBLIC_API_BASE || "http://localhost:8000",
+      apiBase: process.env.NUXT_PUBLIC_API_BASE || "http://localhost:8001",
       supabaseUrl: process.env.NUXT_PUBLIC_SUPABASE_URL || "",
       supabaseKey: process.env.NUXT_PUBLIC_SUPABASE_KEY || "",
       appName: "Factura CR",
@@ -49,9 +54,6 @@ export default defineNuxtConfig({
   },
 
   tailwindcss: {
-    cssPath: "~/assets/css/globals.css",
-    configPath: "tailwind.config.ts",
-    exposeConfig: true,
     viewer: false,
   },
 

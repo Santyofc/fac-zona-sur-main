@@ -1,6 +1,16 @@
+// Validaciones críticas para producción
+if (process.env.NODE_ENV === 'production') {
+  if (!process.env.NUXT_PUBLIC_SUPABASE_URL) {
+    throw new Error("❌ NUXT_PUBLIC_SUPABASE_URL missing in production environment")
+  }
+  if (!process.env.NUXT_PUBLIC_SUPABASE_KEY) {
+    throw new Error("❌ NUXT_PUBLIC_SUPABASE_KEY missing in production environment")
+  }
+}
+
 // https://nuxt.com/docs/api/configuration/nuxt-config
 export default defineNuxtConfig({
-  devtools: { enabled: true },
+  devtools: { enabled: false },
 
   modules: [
     "@nuxt/ui",
@@ -9,8 +19,6 @@ export default defineNuxtConfig({
   ],
 
   supabase: {
-    url: process.env.NUXT_PUBLIC_SUPABASE_URL,
-    key: process.env.NUXT_PUBLIC_SUPABASE_KEY,
     redirect: false,
   },
 
@@ -20,7 +28,8 @@ export default defineNuxtConfig({
 
   runtimeConfig: {
     public: {
-      apiBase: process.env.NUXT_PUBLIC_API_BASE || "http://localhost:8000",
+      // En producción, el navegador debe apuntar a la URL pública manejada por Nginx
+      apiBase: process.env.NUXT_PUBLIC_API_BASE || "https://facturas.zonasurtech.online/backend",
       supabaseUrl: process.env.NUXT_PUBLIC_SUPABASE_URL || "",
       supabaseKey: process.env.NUXT_PUBLIC_SUPABASE_KEY || "",
       appName: "Factura CR",
@@ -49,9 +58,6 @@ export default defineNuxtConfig({
   },
 
   tailwindcss: {
-    cssPath: "~/assets/css/globals.css",
-    configPath: "tailwind.config.ts",
-    exposeConfig: true,
     viewer: false,
   },
 

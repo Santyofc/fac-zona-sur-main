@@ -1,0 +1,18 @@
+module.exports = {
+  apps: [
+    {
+      name: 'facturas-web',
+      port: '3001',
+      exec_mode: 'fork',
+      script: './.output/server/index.mjs',
+      env: {
+        PORT: '3001',
+        HOST: '127.0.0.1',
+        NODE_ENV: 'production',
+        NUXT_PUBLIC_SUPABASE_URL: 'https://vlghiwiwoftzbityvest.supabase.co',
+        NUXT_PUBLIC_SUPABASE_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZsZ2hpd2l3b2Z0emJpdHl2ZXN0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMxOTU5NjQsImV4cCI6MjA4ODc3MTk2NH0.mvC181O5v-MwW3bl10fVhOwDb258OM3p5JLQ_Nv1AYA',
+        NUXT_PUBLIC_API_BASE: 'https://facturas.zonasurtech.online/backend'
+      }
+    }
+  ]
+}
