@@ -71,8 +71,14 @@ async def process_invoice(
     now = _get_cr_now()
 
     # ─── 1. Clave y Consecutivo ────────────────────────────────────────────────
-    doc_type_map = {"FE": DocType.FACTURA_ELECTRONICA, "ND": DocType.NOTA_DEBITO,
-                    "NC": DocType.NOTA_CREDITO, "TE": DocType.TIQUETE_ELECTRONICO}
+    doc_type_map = {
+        "FE": DocType.FACTURA_ELECTRONICA,
+        "ND": DocType.NOTA_DEBITO,
+        "NC": DocType.NOTA_CREDITO,
+        "TE": DocType.TIQUETE_ELECTRONICO,
+        "FEE": DocType.FACTURA_ELECTRONICA_EXPORTACION,
+        "FEC": DocType.FACTURA_ELECTRONICA_COMPRA,
+    }
     doc_type = doc_type_map.get(invoice_data.get("doc_type", "FE"), DocType.FACTURA_ELECTRONICA)
 
     cedula          = "".join(filter(str.isdigit, company_data["cedula_number"]))

@@ -1,0 +1,12 @@
+{
+  "name": "@factura-cr/db",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@prisma/client": "^5.10.2"
+  },
+  "devDependencies": {
+    "prisma": "^5.10.2",
+    "typescript": "^5.3.3"
+  }
+}

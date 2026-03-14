@@ -40,6 +40,19 @@ class UserRole(str, Enum):
     VIEWER = "viewer"
 
 
+class PaymentMethod(str, Enum):
+    PAYPAL = "paypal"
+    MANUAL = "manual"
+
+
+class PaymentStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+
+
 # ─── Auth ─────────────────────────────────────────────────────
 class RegisterRequest(BaseModel):
     email: EmailStr
@@ -254,3 +267,42 @@ class PaginatedResponse(BaseModel):
     page: int
     per_page: int
     pages: int
+
+
+# ─── Payments ─────────────────────────────────────────────────
+class PaymentBase(BaseModel):
+    amount: Decimal = Field(..., gt=0, decimal_places=2)
+    currency: str = Field(..., min_length=3, max_length=3)
+    payment_method: PaymentMethod
+    reference_id: Optional[str] = None
+    receipt_url: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class PaymentCreate(PaymentBase):
+    pass
+
+
+class PaymentUpdate(BaseModel):
+    status: Optional[PaymentStatus] = None
+    notes: Optional[str] = None
+
+
+class PaymentResponse(PaymentBase):
+    id: UUID4
+    company_id: UUID4
+    status: PaymentStatus
+    months_added: int
+    approved_at: Optional[datetime] = None
+    approved_by: Optional[UUID4] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PayPalOrderRequest(BaseModel):
+    plan_id: str  # identifier for the plan being purchased
+    months: int = Field(default=1, gt=0)
+

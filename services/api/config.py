@@ -19,7 +19,8 @@ class Settings(BaseSettings):
     ]
 
     # ─── Database ─────────────────────────────────────────
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:password@localhost:5432/factura_cr"
+    ASYNC_DATABASE_URL: str = "postgresql+asyncpg://postgres:password@localhost:5432/factura_cr"
+    DATABASE_URL: str = "" # Fallback
 
     # ─── Redis / Celery ───────────────────────────────────
     REDIS_URL: str = "redis://localhost:6379/0"

@@ -248,6 +248,41 @@ CREATE TABLE hacienda_documents (
     CONSTRAINT chk_hacienda_status CHECK (hacienda_status IN ('procesando', 'aceptado', 'rechazado', NULL))
 );
 
+-- ────────────────────────────────────────────────────────────
+-- TABLA: payments
+-- Historial de pagos de suscripciones (PayPal / SINPE)
+-- ────────────────────────────────────────────────────────────
+CREATE TABLE payments (
+    id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    company_id      UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    
+    -- Detalles del Pago
+    amount          NUMERIC(12, 2) NOT NULL,
+    currency        VARCHAR(3) NOT NULL DEFAULT 'USD',     -- USD para PayPal, CRC para SINPE
+    payment_method  VARCHAR(20) NOT NULL,                  -- 'paypal' o 'manual' (SINPE)
+    
+    -- Referencias externas
+    reference_id    VARCHAR(255),                          -- PayPal Order ID o Número de Comprobante SINPE
+    receipt_url     VARCHAR(500),                          -- URL de la imagen del comprobante (para pagos manuales)
+    
+    -- Estado
+    status          VARCHAR(20) NOT NULL DEFAULT 'pending', -- pending, approved, rejected
+    
+    -- Meses adquiridos (para el cálculo del plan_expires_at)
+    months_added    INTEGER NOT NULL DEFAULT 1,
+    
+    -- Aprobación (para flujos manuales)
+    approved_at     TIMESTAMPTZ,
+    approved_by     UUID REFERENCES users(id) ON DELETE SET NULL, -- Admin que aprobó
+    notes           TEXT,
+
+    CONSTRAINT chk_payment_method CHECK (payment_method IN ('paypal', 'manual')),
+    CONSTRAINT chk_payment_status CHECK (status IN ('pending', 'approved', 'rejected'))
+);
+
 -- ============================================================
 -- ÍNDICES DE PERFORMANCE
 -- ============================================================
@@ -260,6 +295,7 @@ CREATE INDEX idx_invoices_status ON invoices(status);
 CREATE INDEX idx_invoices_issue_date ON invoices(issue_date DESC);
 CREATE INDEX idx_invoice_items_invoice ON invoice_items(invoice_id);
 CREATE INDEX idx_hacienda_docs_invoice ON hacienda_documents(invoice_id);
+CREATE INDEX idx_payments_company ON payments(company_id);
 
 -- ============================================================
 -- TRIGGERS: updated_at automático
@@ -279,6 +315,7 @@ CREATE TRIGGER set_updated_at_products BEFORE UPDATE ON products FOR EACH ROW EX
 CREATE TRIGGER set_updated_at_invoices BEFORE UPDATE ON invoices FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
 CREATE TRIGGER set_updated_at_invoice_items BEFORE UPDATE ON invoice_items FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
 CREATE TRIGGER set_updated_at_hacienda_documents BEFORE UPDATE ON hacienda_documents FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
+CREATE TRIGGER set_updated_at_payments BEFORE UPDATE ON payments FOR EACH ROW EXECUTE FUNCTION trigger_set_updated_at();
 
 -- ============================================================
 -- ROW LEVEL SECURITY (Supabase Multi-tenant)
@@ -290,6 +327,7 @@ ALTER TABLE products        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE invoices        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE invoice_items   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE hacienda_documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE payments        ENABLE ROW LEVEL SECURITY;
 
 -- Los usuarios solo ven los datos de SU empresa
 -- Se asume que auth.jwt() → company_id está en el claim personalizado
@@ -314,3 +352,6 @@ CREATE POLICY "hacienda_docs_via_invoice" ON hacienda_documents
     USING (invoice_id IN (
         SELECT id FROM invoices WHERE company_id = (auth.jwt() ->> 'company_id')::UUID
     ));
+
+CREATE POLICY "payments_own_company" ON payments
+    USING (company_id = (auth.jwt() ->> 'company_id')::UUID);

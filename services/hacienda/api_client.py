@@ -90,6 +90,11 @@ class HaciendaClient:
     def _cache_key(self) -> str:
         return f"{self.username}:{self.environment}"
 
+    @staticmethod
+    def xml_to_base64(xml_content: str) -> str:
+        """Convierte el contenido XML (string) a Base64 para el envío."""
+        return base64.b64encode(xml_content.encode("utf-8")).decode("utf-8")
+
     async def get_token(self, force_refresh: bool = False) -> str:
         """
         Obtiene el token de acceso OAuth2 de Hacienda.
@@ -108,7 +113,7 @@ class HaciendaClient:
             logger.debug(f"♻️  Token en caché válido para {self.username}")
             return cache["access_token"]
 
-        logger.info(f"🔑 Obteniendo token OAuth2 de Hacienda ({self.environment}) para {self.username}")
+        logger.info(f"[*] Obteniendo token OAuth2 de Hacienda ({self.environment}) para {self.username}")
 
         payload = {
             "grant_type":  "password",
@@ -146,7 +151,7 @@ class HaciendaClient:
             "expires_at":   time.time() + expires_in,
         }
 
-        logger.info(f"✅ Token obtenido. Expira en {expires_in}s")
+        logger.info("[+] Token obtenido. Expira en {}s".format(data.get("expires_in", "???")))
         return access_token
 
     async def send_comprobante(
@@ -180,7 +185,11 @@ class HaciendaClient:
         token = await self.get_token()
 
         # Mapeo tipo comprobante
-        tipo_codes = {"FE": "01", "ND": "02", "NC": "03", "TE": "04", "CCE": "05", "CPCE": "06"}
+        tipo_codes = {
+            "FE": "01", "ND": "02", "NC": "03", "TE": "04",
+            "CCE": "05", "CPCE": "06", "CRCE": "07",
+            "FEE": "08", "FEC": "09"
+        }
         tipo_code = tipo_codes.get(tipo_comprobante, "01")
 
         payload = {
@@ -216,7 +225,7 @@ class HaciendaClient:
             except httpx.TimeoutException:
                 raise HaciendaAPIError(0, "Timeout al enviar comprobante a Hacienda")
 
-        logger.info(f"📤 Comprobante enviado | clave: {clave[:20]}... | HTTP: {resp.status_code}")
+        logger.info("[+] Comprobante enviado | clave: {}... | HTTP: {}".format(clave[:20], resp.status_code))
 
         # 202 = Procesando (éxito normal)
         if resp.status_code in (200, 202):
@@ -231,7 +240,10 @@ class HaciendaClient:
         if resp.status_code == 400:
             try:
                 err = resp.json()
-            except Exception:
+            except Exception as e:
+                print("\n" + "[ERROR]" + "-"*58)
+                logger.error(f"Fallo en el envio: {e}")
+                print("-"*65 + "\n")
                 err = {"message": resp.text}
             raise HaciendaAPIError(400, err.get("message", "Error de validación"), err)
 
@@ -275,7 +287,7 @@ class HaciendaClient:
             except httpx.TimeoutException:
                 raise HaciendaAPIError(0, "Timeout al consultar estado en Hacienda")
 
-        logger.info(f"🔍 Estado consultado | clave: {clave[:20]}... | HTTP: {resp.status_code}")
+        logger.info(f"🔍 Estado consultado | clave: {str(clave)[:20]}... | HTTP: {resp.status_code}")
 
         if resp.status_code == 404:
             return {"ind-estado": "no_encontrado", "raw": {}}

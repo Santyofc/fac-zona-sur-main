@@ -1,0 +1,18 @@
+{
+  "name": "@factura-cr/worker-check-status",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@factura-cr/db": "workspace:*",
+    "cron": "^3.1.6"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3",
+    "tsx": "^4.7.1",
+    "@types/node": "^20.11.17"
+  }
+}

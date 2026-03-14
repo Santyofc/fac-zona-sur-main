@@ -109,3 +109,21 @@ async def get_hacienda_status(
         send_attempts=hacienda_doc.send_attempts,
         pdf_url=hacienda_doc.pdf_url,
     )
+@router.post("/{invoice_id}/status/refresh", response_model=HaciendaStatusResponse)
+async def refresh_hacienda_status(
+    invoice_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Forzar una consulta de estado en tiempo real ante Hacienda y actualizar la DB.
+    Este endpoint es consumido por el worker de fondo para sincronización masiva.
+    """
+    from services.hacienda_service import refresh_invoice_status
+    
+    status_data = await refresh_invoice_status(
+        invoice_id=str(invoice_id),
+        db=db,
+    )
+    
+    return HaciendaStatusResponse(**status_data)

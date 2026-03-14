@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 
 from config import settings
 from database import engine, Base
-from routers import auth, clients, products, invoices, hacienda
+from routers import auth, clients, products, invoices, hacienda, payments
 
 
 @asynccontextmanager
@@ -55,6 +55,7 @@ app.include_router(clients.router,  prefix="/clients",  tags=["Clients"])
 app.include_router(products.router, prefix="/products", tags=["Products"])
 app.include_router(invoices.router, prefix="/invoices", tags=["Invoices"])
 app.include_router(hacienda.router, prefix="/invoices", tags=["Hacienda"])
+app.include_router(payments.router, prefix="/payments", tags=["Payments"])
 
 
 @app.get("/", tags=["Health"])

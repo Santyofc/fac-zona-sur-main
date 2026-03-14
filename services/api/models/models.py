@@ -50,6 +50,7 @@ class Company(Base):
     clients = relationship("Client", back_populates="company", cascade="all, delete-orphan")
     products = relationship("Product", back_populates="company", cascade="all, delete-orphan")
     invoices = relationship("Invoice", back_populates="company", cascade="all, delete-orphan")
+    payments = relationship("Payment", back_populates="company", cascade="all, delete-orphan")
 
 
 class User(Base):
@@ -196,6 +197,32 @@ class HaciendaDocument(Base):
     pdf_url = Column(String(500))
     pdf_generated_at = Column(DateTime(timezone=True))
     send_attempts = Column(SmallInteger, nullable=False, default=0)
-    last_attempt_at = Column(DateTime(timezone=True))
-
     invoice = relationship("Invoice", back_populates="hacienda_doc")
+
+
+class Payment(Base):
+    __tablename__ = "payments"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    company_id = Column(UUID(as_uuid=True), ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    
+    amount = Column(Numeric(12, 2), nullable=False)
+    currency = Column(String(3), nullable=False, default="USD")
+    payment_method = Column(String(20), nullable=False)  # 'paypal' or 'manual'
+    
+    reference_id = Column(String(255))
+    receipt_url = Column(String(500))
+    
+    status = Column(String(20), nullable=False, default="pending")
+    months_added = Column(Integer, nullable=False, default=1)
+    
+    approved_at = Column(DateTime(timezone=True))
+    approved_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"))
+    notes = Column(Text)
+
+    company = relationship("Company", back_populates="payments")
+    approver = relationship("User", foreign_keys=[approved_by])
+

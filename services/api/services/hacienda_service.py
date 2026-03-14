@@ -167,3 +167,65 @@ async def process_invoice_to_hacienda(
         "status":     hac_doc.hacienda_status,
         "hacienda":   hacienda_r,
     }
+
+async def refresh_invoice_status(
+    invoice_id: str,
+    db: AsyncSession,
+) -> dict:
+    """
+    Consulta el estado actual en Hacienda y actualiza la DB local.
+    """
+    from models.models import Invoice, HaciendaDocument, Company
+    from services.hacienda.check_status import check_status
+    from services.hacienda.auth_service import AuthService
+    from config import settings
+
+    # 1. Cargar datos necesarios
+    result = await db.execute(
+        select(Invoice)
+        .options(selectinload(Invoice.hacienda_doc))
+        .where(Invoice.id == invoice_id)
+    )
+    invoice = result.scalar_one_or_none()
+    if not invoice or not invoice.hacienda_doc:
+        raise ValueError("Factura o documento Hacienda no encontrado.")
+
+    comp_result = await db.execute(select(Company).where(Company.id == invoice.company_id))
+    company = comp_result.scalar_one()
+
+    # 2. Configurar AuthService y Consultar
+    auth = AuthService(
+        username=settings.HACIENDA_USERNAME,
+        password=settings.HACIENDA_PASSWORD,
+        environment=settings.HACIENDA_ENV,
+    )
+
+    status_result = await check_status(
+        clave=invoice.clave,
+        auth=auth,
+        environment=settings.HACIENDA_ENV,
+    )
+
+    # 3. Actualizar DB
+    hac_doc = invoice.hacienda_doc
+    hac_doc.hacienda_status = status_result.status.value
+    hac_doc.hacienda_msg = status_result.message
+    hac_doc.response_date = datetime.now(timezone.utc)
+    
+    if status_result.status.value == "aceptado":
+        invoice.status = "sent"
+    elif status_result.status.value == "rechazado":
+        invoice.status = "rejected"
+
+    await db.commit()
+
+    return {
+        "invoice_id": invoice.id,
+        "status": invoice.status,
+        "hacienda_status": hac_doc.hacienda_status,
+        "hacienda_msg": hac_doc.hacienda_msg,
+        "submission_date": hac_doc.submission_date,
+        "response_date": hac_doc.response_date,
+        "send_attempts": hac_doc.send_attempts,
+        "pdf_url": hac_doc.pdf_url,
+    }

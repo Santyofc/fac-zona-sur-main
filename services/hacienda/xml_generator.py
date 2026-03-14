@@ -28,6 +28,8 @@ NS = {
     "nd":  "https://cdn.comprobanteselectronicos.go.cr/xml/v4.4/notaDebitoElectronica",
     "nc":  "https://cdn.comprobanteselectronicos.go.cr/xml/v4.4/notaCreditoElectronica",
     "te":  "https://cdn.comprobanteselectronicos.go.cr/xml/v4.4/tiqueteElectronico",
+    "fee": "https://cdn.comprobanteselectronicos.go.cr/xml/v4.4/facturaElectronicaExportacion",
+    "fec": "https://cdn.comprobanteselectronicos.go.cr/xml/v4.4/facturaElectronicaCompra",
     "xsd": "http://www.w3.org/2001/XMLSchema",
     "ds":  "http://www.w3.org/2000/09/xmldsig#",
 }
@@ -38,6 +40,8 @@ ROOT_NAMES = {
     "ND": "NotaDebitoElectronica",
     "NC": "NotaCreditoElectronica",
     "TE": "TiqueteElectronico",
+    "FEE": "FacturaElectronicaExportacion",
+    "FEC": "FacturaElectronicaCompra",
 }
 
 # Normativa
@@ -249,14 +253,14 @@ def _build_resumen(parent: ET.Element, items: list[dict], currency: str = "CRC",
 
 def _calculate_totals(items: list[dict]) -> dict:
     """Calcula los totales del resumen de factura."""
-    total_serv_gravados     = Decimal("0.00")
-    total_serv_exentos      = Decimal("0.00")
-    total_serv_exonerado    = Decimal("0.00")
-    total_merc_gravadas     = Decimal("0.00")
-    total_merc_exentas      = Decimal("0.00")
-    total_merc_exonerada    = Decimal("0.00")
-    total_descuentos        = Decimal("0.00")
-    total_impuesto          = Decimal("0.00")
+    total_serv_gravados: Decimal     = Decimal("0.00")
+    total_serv_exentos: Decimal      = Decimal("0.00")
+    total_serv_exonerado: Decimal    = Decimal("0.00")
+    total_merc_gravadas: Decimal     = Decimal("0.00")
+    total_merc_exentas: Decimal      = Decimal("0.00")
+    total_merc_exonerada: Decimal    = Decimal("0.00")
+    total_descuentos: Decimal        = Decimal("0.00")
+    total_impuesto: Decimal          = Decimal("0.00")
 
     for item in items:
         cantidad = _d5(item["cantidad"])
@@ -265,12 +269,12 @@ def _calculate_totals(items: list[dict]) -> dict:
 
         desc_pct = _d(item.get("descuento_porcentaje", 0)) / 100
         desc_amt = (subtotal * desc_pct).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        total_descuentos += desc_amt
+        total_descuentos = Decimal(total_descuentos) + Decimal(desc_amt)
 
         subtotal_neto = subtotal - desc_amt
         tarifa = _d(item.get("impuesto_tarifa", 0))
         imp_monto = (subtotal_neto * tarifa / 100).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        total_impuesto += imp_monto
+        total_impuesto = Decimal(total_impuesto) + Decimal(imp_monto)
 
         # Clasificar servicio vs mercancía y gravado vs exento
         is_service   = item.get("unidad_medida", "Unid") in ("Sp", "Os", "Spe", "St", "Al")
@@ -279,26 +283,26 @@ def _calculate_totals(items: list[dict]) -> dict:
 
         if is_exonerado:
             if is_service:
-                total_serv_exonerado += subtotal_neto
+                total_serv_exonerado = Decimal(total_serv_exonerado) + Decimal(subtotal_neto)
             else:
-                total_merc_exonerada += subtotal_neto
+                total_merc_exonerada = Decimal(total_merc_exonerada) + Decimal(subtotal_neto)
         elif is_exento:
             if is_service:
-                total_serv_exentos += subtotal_neto
+                total_serv_exentos = Decimal(total_serv_exentos) + Decimal(subtotal_neto)
             else:
-                total_merc_exentas += subtotal_neto
+                total_merc_exentas = Decimal(total_merc_exentas) + Decimal(subtotal_neto)
         else:
             if is_service:
-                total_serv_gravados += subtotal_neto
+                total_serv_gravados = Decimal(total_serv_gravados) + Decimal(subtotal_neto)
             else:
-                total_merc_gravadas += subtotal_neto
+                total_merc_gravadas = Decimal(total_merc_gravadas) + Decimal(subtotal_neto)
 
-    total_gravado   = total_serv_gravados + total_merc_gravadas
-    total_exento    = total_serv_exentos  + total_merc_exentas
-    total_exonerado = total_serv_exonerado + total_merc_exonerada
-    total_venta     = total_gravado + total_exento + total_exonerado + total_descuentos
-    total_venta_neta = total_venta - total_descuentos
-    total_comprobante = total_venta_neta + total_impuesto
+    total_gravado   = Decimal(total_serv_gravados) + Decimal(total_merc_gravadas)
+    total_exento    = Decimal(total_serv_exentos)  + Decimal(total_merc_exentas)
+    total_exonerado = Decimal(total_serv_exonerado) + Decimal(total_merc_exonerada)
+    total_venta     = Decimal(total_gravado) + Decimal(total_exento) + Decimal(total_exonerado) + Decimal(total_descuentos)
+    total_venta_neta = Decimal(total_venta) - Decimal(total_descuentos)
+    total_comprobante = Decimal(total_venta_neta) + Decimal(total_impuesto)
 
     return {
         "total_serv_gravados":  total_serv_gravados,
@@ -364,7 +368,6 @@ def generate_xml(payload: dict) -> str:
     root = ET.Element(
         f"{{{ns_uri}}}{root_tag}",
         attrib={
-            "xmlns":              ns_uri,
             "xmlns:xsd":          NS["xsd"],
             "xmlns:ds":           NS["ds"],
         }
