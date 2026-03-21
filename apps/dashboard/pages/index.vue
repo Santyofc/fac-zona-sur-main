@@ -129,16 +129,30 @@ const statsLoading = ref(true)
 const recentInvoices = ref<Invoice[]>([])
 const invoicesLoading = ref(true)
 
-// Advanced revenue data for premium look
-const revenueData = computed(() => ({
-  labels: ['Sem 1', 'Sem 2', 'Sem 3', 'Sem 4'],
-  datasets: [{
-    label: 'Ingresos (₡)',
-    data: [750000, 1100000, 890000, 1550000],
-    borderColor: '#3b82f6', // zs-blue
-    backgroundColor: 'rgba(59, 130, 246, 0.05)',
-  }]
-}))
+// Advanced revenue data from stats
+const revenueData = computed(() => {
+  if (!stats.value?.revenue_history?.length) {
+    return {
+      labels: ['Sem 1', 'Sem 2', 'Sem 3', 'Sem 4'],
+      datasets: [{
+        label: 'Ingresos (₡)',
+        data: [0, 0, 0, 0],
+        borderColor: '#3b82f6',
+        backgroundColor: 'rgba(59, 130, 246, 0.05)',
+      }]
+    }
+  }
+  
+  return {
+    labels: stats.value.revenue_history.map(h => h.label),
+    datasets: [{
+      label: 'Ingresos (₡)',
+      data: stats.value.revenue_history.map(h => Number(h.value)),
+      borderColor: '#3b82f6',
+      backgroundColor: 'rgba(59, 130, 246, 0.05)',
+    }]
+  }
+})
 
 const statusBreakdown = computed(() => [
   { label: 'Aceptadas', key: 'accepted', count: stats.value?.invoices_accepted || 0, dotClass: 'bg-zs-emerald' },
@@ -155,12 +169,17 @@ const formatCRC = (value: number | string) => {
 
 onMounted(async () => {
   try {
-    const [statsData, invoicesData] = await Promise.all([
+    const { fetchProfile } = useApi()
+    const [statsData, invoicesData, profile] = await Promise.all([
       fetchStats(),
       fetchInvoices({ limit: 5 }),
+      fetchProfile()
     ])
     stats.value = statsData
     recentInvoices.value = invoicesData
+    if (profile?.company?.name) {
+      companyName.value = profile.company.name
+    }
   } catch (e) {
     console.error('Error loading dashboard:', e)
   } finally {

@@ -8,8 +8,9 @@ from contextlib import asynccontextmanager
 
 from config import settings
 from database import engine, Base
-from routers import auth, clients, products, invoices, hacienda, payments
-
+from limiter import limiter
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -39,6 +40,10 @@ app = FastAPI(
     docs_url="/docs" if settings.APP_DEBUG else None,
     redoc_url="/redoc" if settings.APP_DEBUG else None,
 )
+
+# ─── Rate Limiting ───────────────────────────────────────────
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # ─── CORS ────────────────────────────────────────────────────
 app.add_middleware(

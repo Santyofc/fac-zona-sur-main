@@ -1,22 +1,35 @@
 """
 Invoices Router — Creación y consulta de facturas electrónicas
 """
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+
+
+logger = logging.getLogger(__name__)
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 from typing import List, Optional
 from uuid import UUID
 from decimal import Decimal
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from database import get_db
+from config import get_settings
 from models.models import User, Invoice, InvoiceItem, Client, Company
 from schemas.schemas import InvoiceCreate, InvoiceResponse, InvoiceListItem, DashboardStats
 from routers.deps import get_current_user
-from services.invoice_service import generate_clave, generate_consecutive
+from services.hacienda.clave import generate_clave, DocType as HaciendaDocType
+from services.invoice_hacienda_service import InvoiceHaciendaService
 
 router = APIRouter()
+
+DOC_TYPE_MAP = {
+    "FE": HaciendaDocType.FACTURA_ELECTRONICA,
+    "TE": HaciendaDocType.TIQUETE_ELECTRONICO,
+    "NC": HaciendaDocType.NOTA_CREDITO,
+    "ND": HaciendaDocType.NOTA_DEBITO,
+}
 
 
 @router.get("/stats", response_model=DashboardStats)
@@ -56,6 +69,24 @@ async def get_dashboard_stats(
     )
     tax_accumulated = tax_q.scalar()
 
+    # Revenue history (últimas 4 semanas)
+    revenue_history = []
+    for i in range(3, -1, -1):
+        start_date = now - timedelta(days=(i+1)*7)
+        end_date   = now - timedelta(days=i*7)
+        
+        hist_q = await db.execute(
+            select(func.coalesce(func.sum(Invoice.total), 0)).where(
+                Invoice.company_id == current_user.company_id,
+                Invoice.status == "accepted",
+                Invoice.issue_date >= start_date,
+                Invoice.issue_date < end_date,
+            )
+        )
+        val = hist_q.scalar()
+        label = f"Sem {4-i}"
+        revenue_history.append({"label": label, "value": Decimal(str(val))})
+
     return DashboardStats(
         revenue_month=Decimal(str(revenue_month)),
         invoices_issued=sum(counts.values()),
@@ -63,6 +94,7 @@ async def get_dashboard_stats(
         invoices_pending=counts.get("processing", 0) + counts.get("sent", 0),
         invoices_accepted=counts.get("accepted", 0),
         invoices_rejected=counts.get("rejected", 0),
+        revenue_history=revenue_history,
     )
 
 
@@ -112,20 +144,24 @@ async def create_invoice(
     current_user: User = Depends(get_current_user),
 ):
     """Crear una nueva factura electrónica."""
-    # Fetch company for consecutive number
+    # Fetch company with SELECT FOR UPDATE to prevent concurrency issues with consecutive_num
     company_result = await db.execute(
-        select(Company).where(Company.id == current_user.company_id)
+        select(Company)
+        .where(Company.id == current_user.company_id)
+        .with_for_update()
     )
     company = company_result.scalar_one_or_none()
     if not company:
         raise HTTPException(status_code=404, detail="Empresa no encontrada.")
 
-    # Generate consecutive and clave
-    consecutive = generate_consecutive(company.consecutive_num)
-    clave = generate_clave(
-        province="1",
-        consecutive=consecutive,
+    # Convert schema DocType to HaciendaDocType
+    hacienda_doc_type = DOC_TYPE_MAP.get(data.doc_type.value, HaciendaDocType.FACTURA_ELECTRONICA)
+
+    # Generate consecutive and clave using the correct logic from clave.py
+    clave, consecutive = generate_clave(
         cedula=company.cedula_number,
+        sequence_number=company.consecutive_num,
+        doc_type=hacienda_doc_type,
     )
 
     # Calculate totals from items
@@ -225,3 +261,67 @@ async def get_invoice(
     if not invoice:
         raise HTTPException(status_code=404, detail="Factura no encontrada.")
     return invoice
+
+
+@router.post("/{invoice_id}/send")
+async def send_invoice(
+    invoice_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Inicia el envío de una factura a Hacienda en segundo plano.
+    """
+    # Verificar ownership
+    result = await db.execute(
+        select(Invoice).where(Invoice.id == invoice_id, Invoice.company_id == current_user.company_id)
+    )
+    invoice = result.scalar_one_or_none()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Factura no encontrada.")
+
+    if invoice.status in ("accepted", "processing"):
+        raise HTTPException(status_code=400, detail="La factura ya está en proceso o fue aceptada.")
+
+    # Disparar tarea Celery
+    from tasks import send_invoice_to_hacienda
+    send_invoice_to_hacienda.delay(str(invoice_id))
+
+    # Actualizar estado local a 'sent' (o 'processing')
+    invoice.status = "sent"
+    await db.commit()
+
+    return {"message": "Envío iniciado", "invoice_id": invoice_id}
+
+
+@router.get("/{invoice_id}/status")
+async def get_invoice_hacienda_status(
+    invoice_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Sincroniza y retorna el estado actual de la factura en Hacienda.
+    """
+    settings = get_settings()
+    service = InvoiceHaciendaService(db, settings)
+    
+    try:
+        # Primero intentamos sincronizar con Hacienda si está pendiente
+        result = await service.check_status(str(invoice_id))
+        return result
+    except Exception as e:
+        logger.error(f"Error checking status for {invoice_id}: {e}")
+        # Si falla el sync, al menos devolvemos lo que tenemos en DB
+        invoice_result = await db.execute(
+            select(Invoice).where(Invoice.id == invoice_id, Invoice.company_id == current_user.company_id)
+        )
+        invoice = invoice_result.scalar_one_or_none()
+        if not invoice:
+            raise HTTPException(status_code=404, detail="Factura no encontrada.")
+        
+        return {
+            "invoice_id": invoice_id,
+            "status": invoice.status,
+            "message": "No se pudo sincronizar con Hacienda en este momento."
+        }

@@ -29,9 +29,9 @@ services:
       - "8000:8000"
     environment:
       - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/1
       - JWT_SECRET=${JWT_SECRET}
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
@@ -59,9 +59,9 @@ services:
     container_name: factura-cr-worker
     environment:
       - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/1
       - HACIENDA_API_URL=${HACIENDA_API_URL}
       - HACIENDA_TOKEN_URL=${HACIENDA_TOKEN_URL}
       - HACIENDA_CLIENT_ID=${HACIENDA_CLIENT_ID}
@@ -84,7 +84,7 @@ services:
       - "6379:6379"
     volumes:
       - redis-data:/data
-    command: redis-server --save 60 1 --loglevel warning
+    command: redis-server --requirepass ${REDIS_PASSWORD} --save 60 1 --loglevel warning
     restart: unless-stopped
     networks:
       - fcr-network

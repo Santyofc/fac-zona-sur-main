@@ -100,10 +100,11 @@ def send_invoice_to_hacienda(self, invoice_id: str) -> dict:
 async def _async_process_invoice(invoice_id: str, config) -> dict:
     """Ejecuta el pipeline asíncrono de Hacienda dentro del worker Celery."""
     from database import get_db_session
-    from services.hacienda_service import process_invoice_to_hacienda
+    from services.invoice_hacienda_service import InvoiceHaciendaService
 
     async with get_db_session() as db:
-        return await process_invoice_to_hacienda(invoice_id, db, config)
+        service = InvoiceHaciendaService(db, config)
+        return await service.process_invoice(invoice_id)
 
 
 # ─── TASK: Verificar estado de comprobantes pendientes ────────────────────────
@@ -127,28 +128,23 @@ def check_pending_invoices() -> dict:
 
 async def _async_check_pending() -> dict:
     """Consulta y actualiza estado de facturas pendientes en la DB."""
-    from sqlalchemy import select, update
+    from sqlalchemy import select
     from database import get_db_session
-    from models.models import Invoice, HaciendaDocument
+    from models.models import Invoice
     from config import get_settings
-    from services.hacienda.check_status import check_status, ComprobanteStatus
-    from services.hacienda.auth_service import AuthService
+    from services.invoice_hacienda_service import InvoiceHaciendaService
 
-    config   = get_settings()
+    settings = get_settings()
     updated  = 0
     errors   = 0
 
-    auth = AuthService(
-        username    = config.HACIENDA_USERNAME,
-        password    = config.HACIENDA_PASSWORD,
-        environment = config.HACIENDA_ENV,
-    )
-
     async with get_db_session() as db:
-        # Buscar facturas con estado 'processing' que tienen clave asignada
+        service = InvoiceHaciendaService(db, settings)
+        
+        # Buscar facturas con estado 'processing' o 'sent' (pendientes)
         result = await db.execute(
             select(Invoice).where(
-                Invoice.status == "processing",
+                Invoice.status.in_(["processing", "sent"]),
                 Invoice.clave != None,
             ).limit(50)
         )
@@ -156,40 +152,11 @@ async def _async_check_pending() -> dict:
 
         for invoice in invoices:
             try:
-                status_result = await check_status(
-                    clave       = invoice.clave,
-                    auth        = auth,
-                    environment = config.HACIENDA_ENV,
-                )
-
-                if status_result.status in (
-                    ComprobanteStatus.ACEPTADO,
-                    ComprobanteStatus.RECHAZADO,
-                ):
-                    invoice.status = (
-                        "accepted" if status_result.status == ComprobanteStatus.ACEPTADO
-                        else "rejected"
-                    )
-
-                    # Actualizar HaciendaDocument
-                    hac_result = await db.execute(
-                        select(HaciendaDocument).where(
-                            HaciendaDocument.invoice_id == invoice.id
-                        )
-                    )
-                    hac_doc = hac_result.scalar_one_or_none()
-                    if hac_doc:
-                        hac_doc.hacienda_status  = status_result.status.value
-                        hac_doc.hacienda_msg     = status_result.message
-                        hac_doc.response_xml     = status_result.respuesta_xml
-
-                    updated += 1
-
+                await service.check_status(str(invoice.id))
+                updated += 1
             except Exception as exc:
                 logger.error(f"[check_pending] Error al verificar {invoice.clave}: {exc}")
                 errors += 1
-
-        await db.commit()
 
     return {"updated": updated, "errors": errors, "total": len(invoices)}
 

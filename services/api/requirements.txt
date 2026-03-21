@@ -46,3 +46,4 @@ python-dotenv==1.0.1       # .env loading
 structlog==24.1.0          # Structured logging
 orjson==3.9.15             # Fast JSON serialization
 anyio==4.3.0               # Async compatibility
+slowapi==0.1.9             # Rate limiting

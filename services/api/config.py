@@ -32,6 +32,18 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 1440  # 24h
 
+    # ─── Hub Module Exchange ──────────────────────────────
+    HUB_TOKEN_SHARED_SECRET: str = ""
+    HUB_TOKEN_ISSUER: str = "app.zonasurtech.online"
+    HUB_TOKEN_AUDIENCE: str = "zonasurtech-module"
+    HUB_TOKEN_ALGORITHM: str = "HS256"
+    HUB_EXPECTED_MODULE_KEY: str = "billing"
+    MODULE_SESSION_COOKIE_NAME: str = "fac_session"
+    MODULE_SESSION_COOKIE_SAMESITE: str = "lax"
+    MODULE_SESSION_COOKIE_SECURE: bool = True
+    MODULE_DASHBOARD_PATH: str = "/dashboard"
+    MODULE_AUTH_REPLAY_PREFIX: str = "fac:exchange:jti"
+
     # ─── Supabase ─────────────────────────────────────────
     SUPABASE_URL: str = ""
     SUPABASE_SERVICE_ROLE_KEY: str = ""

@@ -1,6 +1,3 @@
-"""
-Pydantic Schemas (Request/Response) — Factura CR
-"""
 from pydantic import BaseModel, EmailStr, UUID4, Field
 from typing import Optional, List
 from datetime import datetime
@@ -27,10 +24,10 @@ class InvoiceStatus(str, Enum):
 
 
 class DocType(str, Enum):
-    FE = "FE"   # Factura Electrónica
-    TE = "TE"   # Tiquete Electrónico
-    NC = "NC"   # Nota de Crédito
-    ND = "ND"   # Nota de Débito
+    FE = "FE"
+    TE = "TE"
+    NC = "NC"
+    ND = "ND"
 
 
 class UserRole(str, Enum):
@@ -51,9 +48,6 @@ class PaymentStatus(str, Enum):
     REJECTED = "rejected"
 
 
-
-
-# ─── Auth ─────────────────────────────────────────────────────
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8)
@@ -75,6 +69,25 @@ class TokenResponse(BaseModel):
     expires_in: int
     user_id: str
     company_id: str
+
+
+class ModuleExchangeRequest(BaseModel):
+    token: str
+    redirect_path: Optional[str] = None
+    redirect: bool = False
+
+
+class ModuleExchangeResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    expires_at: datetime
+    user_id: str
+    company_id: str
+    tenant_id: str
+    module_key: str
+    jti: str
+    redirect_to: str
 
 
 # ─── Client ───────────────────────────────────────────────────
@@ -112,7 +125,6 @@ class ClientResponse(ClientBase):
         from_attributes = True
 
 
-# ─── Product ──────────────────────────────────────────────────
 class ProductBase(BaseModel):
     code: Optional[str] = None
     cabys_code: Optional[str] = None
@@ -145,7 +157,6 @@ class ProductResponse(ProductBase):
         from_attributes = True
 
 
-# ─── Invoice Items ────────────────────────────────────────────
 class InvoiceItemCreate(BaseModel):
     product_id: Optional[UUID4] = None
     cabys_code: Optional[str] = None
@@ -171,7 +182,6 @@ class InvoiceItemResponse(InvoiceItemCreate):
         from_attributes = True
 
 
-# ─── Invoice ──────────────────────────────────────────────────
 class InvoiceCreate(BaseModel):
     client_id: Optional[UUID4] = None
     doc_type: DocType = DocType.FE
@@ -231,7 +241,6 @@ class InvoiceListItem(BaseModel):
         from_attributes = True
 
 
-# ─── Hacienda ─────────────────────────────────────────────────
 class HaciendaStatusResponse(BaseModel):
     invoice_id: UUID4
     status: str
@@ -246,7 +255,11 @@ class HaciendaStatusResponse(BaseModel):
         from_attributes = True
 
 
-# ─── Dashboard Stats ──────────────────────────────────────────
+class RevenuePoint(BaseModel):
+    label: str
+    value: Decimal
+
+
 class DashboardStats(BaseModel):
     revenue_month: Decimal
     invoices_issued: int
@@ -254,9 +267,9 @@ class DashboardStats(BaseModel):
     invoices_pending: int
     invoices_accepted: int
     invoices_rejected: int
+    revenue_history: List[RevenuePoint] = []
 
 
-# ─── Generic ──────────────────────────────────────────────────
 class MessageResponse(BaseModel):
     message: str
     detail: Optional[str] = None
@@ -269,7 +282,6 @@ class PaginatedResponse(BaseModel):
     pages: int
 
 
-# ─── Payments ─────────────────────────────────────────────────
 class PaymentBase(BaseModel):
     amount: Decimal = Field(..., gt=0, decimal_places=2)
     currency: str = Field(..., min_length=3, max_length=3)
@@ -303,6 +315,5 @@ class PaymentResponse(PaymentBase):
 
 
 class PayPalOrderRequest(BaseModel):
-    plan_id: str  # identifier for the plan being purchased
+    plan_id: str
     months: int = Field(default=1, gt=0)
-

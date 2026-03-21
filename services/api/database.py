@@ -24,8 +24,25 @@ class Base(DeclarativeBase):
     pass
 
 
+from contextlib import asynccontextmanager
+
+
 async def get_db() -> AsyncSession:
     """Dependency: provide an async DB session per request."""
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        finally:
+            await session.close()
+
+
+@asynccontextmanager
+async def get_db_session():
+    """Context manager for async DB session, usable outside FastAPI dependencies."""
     async with AsyncSessionLocal() as session:
         try:
             yield session

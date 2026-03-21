@@ -109,5 +109,14 @@ export function useApi() {
     return !!localStorage.getItem('fcr_token')
   }
 
-  return { login, register, logout, isAuthenticated }
+  async function fetchProfile() {
+    const token = localStorage.getItem('fcr_token')
+    if (!token) return null
+    return await $fetch('/auth/me', {
+      baseURL: apiBase,
+      headers: { Authorization: `Bearer ${token}` }
+    })
+  }
+
+  return { login, register, logout, isAuthenticated, fetchProfile }
 }
