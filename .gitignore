@@ -57,3 +57,12 @@ certs/
 
 # Redis
 dump.rdb
+
+# Facturador local runtime artifacts
+facturador/.tmp_local/
+facturador/.tmp/
+facturador/.pip_tmp/
+facturador/.pip_tracker/
+facturador/.storage/
+facturador/.pytest_cache/
+facturador/pytest-cache-files-*/
