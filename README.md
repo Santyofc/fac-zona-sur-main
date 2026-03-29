@@ -1,287 +1,228 @@
-# Factura CR — SaaS de Facturación Electrónica para Costa Rica
+# ═══════════════════════════════════════════════════════════════
+# Factura CR — Sistema de Facturación Electrónica Costa Rica
+# ═══════════════════════════════════════════════════════════════
 
-[![Hacienda v4.4](https://img.shields.io/badge/Hacienda%20CR-v4.4-blue)](https://www.hacienda.go.cr)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.110-009688)](https://fastapi.tiangolo.com)
-[![Nuxt 3](https://img.shields.io/badge/Nuxt-3-00DC82)](https://nuxt.com)
-[![Python](https://img.shields.io/badge/Python-3.11-3776AB)](https://python.org)
+Sistema completo de facturación electrónica para Costa Rica con integración a Hacienda, PayPal y Neon PostgreSQL.
 
-Plataforma SaaS multiempresa para emisión de comprobantes electrónicos válidos ante el Ministerio de Hacienda de Costa Rica. Implementa el estándar **Comprobantes Electrónicos v4.4** con firma digital XAdES-BES, generación XML, envío a API Hacienda y dashboard financiero.
+## 🚀 Inicio Rápido con Neon
 
----
+### 1. Configurar Neon Database
 
-## ✅ Funcionalidades
-
-| Módulo | Estado | Descripción |
-|--------|--------|-------------|
-| Clave 50 dígitos | ✅ | Generador exacto según spec Hacienda |
-| XML v4.4 | ✅ | FE, TE, NC, ND con IVA, CABYS, descuentos |
-| Firma XAdES-BES | ✅ | Con certificado .p12 del BCCR |
-| OAuth2 Hacienda | ✅ | Token automático con caché |
-| Envío a Hacienda | ✅ | POST /recepcion con retry |
-| Consulta estado | ✅ | GET /recepcion/{clave} |
-| PDF con QR | ✅ | ReportLab + qrcode |
-| Dashboard | ✅ | Nuxt 3 + Chart.js |
-| Celery Workers | ✅ | Envío y polling en background |
-| Multi-empresa | ✅ | RLS en Supabase |
-
----
-
-## 🏗️ Arquitectura
-
-```
-Users → Cloudflare → Nginx
-                   → Nuxt Dashboard (:3000)
-                   → FastAPI API     (:8000)
-                       ↓
-                   Supabase PostgreSQL
-                   Redis + Celery Workers
-```
-
-### Estructura del Monorepo
-
-```
-factura-cr/
-├── apps/
-│   ├── dashboard/              # Panel SaaS (Nuxt 3)
-│   │   ├── pages/
-│   │   │   ├── index.vue       # Dashboard financiero
-│   │   │   ├── invoices/       # Gestión facturas
-│   │   │   ├── clients/        # Gestión clientes
-│   │   │   ├── products/       # Catálogo productos
-│   │   │   ├── reports/        # Reportes IVA
-│   │   │   ├── settings/       # Config empresa
-│   │   │   └── auth/login.vue
-│   │   └── components/
-│   │       ├── InvoiceForm.vue  # Form con CABYS / IVA
-│   │       ├── StatsCards.vue
-│   │       └── RevenueChart.vue
-│   └── web/                    # Landing page
-├── services/
-│   ├── api/                    # FastAPI backend
-│   │   ├── main.py
-│   │   ├── routers/            # auth, clients, products, invoices, hacienda
-│   │   ├── services/           # hacienda_service, pdf_service
-│   │   └── tasks.py            # Celery workers
-│   └── hacienda/               # Microservicio Hacienda CR
-│       ├── clave.py            # Clave 50 dígitos
-│       ├── xml_generator.py    # XML v4.4 FE/TE/NC/ND
-│       ├── signer.py           # XAdES-BES signing
-│       ├── api_client.py       # OAuth2 + API client
-│       ├── hacienda.py         # Pipeline orchestrator
-│       ├── auth_service.py     # Token management
-│       ├── send_invoice.py     # POST /recepcion
-│       ├── check_status.py     # GET /recepcion/{clave}
-│       ├── xml/
-│       │   └── factura_xml.py  # XML facade
-│       ├── signing/
-│       │   └── xades_signer.py # XadesSigner class
-│       └── utils/
-│           ├── base64_encoder.py
-│           └── clave_generator.py
-├── database/
-│   └── schema.sql              # PostgreSQL + RLS
-├── infra/
-│   ├── docker/                 # Dockerfiles
-│   └── nginx/                  # nginx.conf
-├── docker-compose.yml
-└── Makefile
-```
-
----
-
-## 🚀 Inicio Rápido
-
-### 1. Clonar y configurar
+1. Ve a [neon.tech](https://neon.tech) y crea una cuenta
+2. Crea un nuevo proyecto
+3. Copia la connection string (parece: `postgresql://user:password@ep-xxx.us-east-1.aws.neon.tech/neondb?sslmode=require`)
+4. Actualiza tu `.env`:
 
 ```bash
-git clone https://github.com/zonasurtech/factura-cr
-cd factura-cr
+# Reemplaza con tu connection string real
+DATABASE_URL=postgresql+asyncpg://user:password@ep-xxx.us-east-1.aws.neon.tech/neondb?sslmode=require
+ASYNC_DATABASE_URL=postgresql+asyncpg://user:password@ep-xxx.us-east-1.aws.neon.tech/neondb?sslmode=require
 
-# Copiar variables de entorno
-cp .env.example .env
-# Editar .env con tus credenciales
+# Opcional: Para usar Neon API (backups, etc.)
+NEON_PROJECT_ID=tu-project-id
+NEON_API_KEY=tu-api-key
 ```
 
-### 2. Backend (FastAPI)
+### 2. Configurar Supabase (Storage)
+
+1. Ve a [supabase.com](https://supabase.com) y crea un proyecto
+2. Ve a Settings > API y copia:
+   - Project URL
+   - Anon public key
+   - Service role key (secret!)
+3. Crea un bucket llamado `invoices` con permisos públicos
+4. Actualiza tu `.env`:
 
 ```bash
-cd services/api
-pip install -r requirements.txt
-
-# Desarrollo
-uvicorn main:app --reload --port 8000
-
-# Celery Worker
-celery -A tasks worker --loglevel=info
-
-# Celery Beat (tareas programadas)
-celery -A tasks beat --loglevel=info
+SUPABASE_URL=https://tu-project.supabase.co
+SUPABASE_ANON_KEY=tu-anon-key
+SUPABASE_SERVICE_ROLE_KEY=tu-service-role-key
 ```
 
-### 3. Dashboard (Nuxt 3)
+### 3. Configurar PayPal
+
+1. Ve a [developer.paypal.com](https://developer.paypal.com)
+2. Crea una app en sandbox
+3. Copia Client ID y Secret
+4. Actualiza tu `.env`:
 
 ```bash
-cd apps/dashboard
+PAYPAL_CLIENT_ID=tu-client-id
+PAYPAL_CLIENT_SECRET=tu-secret
+PAYPAL_ENVIRONMENT=sandbox  # o 'production'
+```
+
+### 4. Configurar Hacienda (Sandbox)
+
+1. Regístrate en [Hacienda ATV](https://www.hacienda.go.cr/ATV/Inicio.aspx)
+2. Obtén credenciales de API
+3. Descarga certificado .p12
+4. Actualiza tu `.env`:
+
+```bash
+HACIENDA_CLIENT_ID=tu-client-id
+HACIENDA_CLIENT_SECRET=tu-secret
+HACIENDA_USERNAME=tu-cedula
+HACIENDA_PASSWORD=tu-atv-password
+```
+
+5. Copia certificado a: `services/api/certs/firma.p12`
+
+### 5. Iniciar la aplicación
+
+```bash
+# Instalar dependencias
 pnpm install
-pnpm dev    # → http://localhost:3000
+
+# Construir imágenes Docker
+docker-compose build
+
+# Inicializar base de datos (solo primera vez)
+docker-compose --profile init run --rm init-db
+
+# Iniciar todos los servicios
+docker-compose up -d
+
+# Ver logs
+docker-compose logs -f
 ```
 
-### 4. Landing (Nuxt 3)
+### 6. Acceder a la aplicación
 
-```bash
-cd apps/web
-pnpm install
-pnpm dev    # → http://localhost:3001
-```
-
-### 5. Docker Compose (Recomendado)
-
-```bash
-docker-compose up --build
-```
-
-Servicios levantados:
-- **Frontend**: http://localhost:3000
-- **API**:      http://localhost:8000
+- **Dashboard**: http://localhost:3000
 - **API Docs**: http://localhost:8000/docs
-- **Landing**:  http://localhost:3001
+- **Usuario de prueba**: admin@test.cr / password
+
+## 📋 Arquitectura
+
+```
+Factura CR
+├── Frontend (Nuxt 3 + Vue 3 + Tailwind)
+├── Backend (FastAPI + PostgreSQL)
+├── Workers (Celery + Redis)
+├── Storage (Supabase)
+├── Payments (PayPal)
+└── Hacienda API (Costa Rica)
+```
+
+## 🔧 Desarrollo Local
+
+### Prerrequisitos
+
+- Docker & Docker Compose
+- Node.js 18+ & pnpm
+- Python 3.11+
+- Cuentas en Neon, Supabase, PayPal, Hacienda
+
+### Comandos útiles
+
+```bash
+# Desarrollo frontend
+cd apps/dashboard
+pnpm dev
+
+# Desarrollo backend
+cd services/api
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn main:app --reload
+
+# Ver estado de contenedores
+docker-compose ps
+
+# Ver logs
+docker-compose logs backend
+docker-compose logs worker
+
+# Reiniciar servicios
+docker-compose restart backend
+docker-compose restart worker
+
+# Limpiar todo
+docker-compose down -v
+```
+
+## 🔐 Variables de Entorno
+
+Ver `.env.example` para todas las variables requeridas.
+
+## 📊 Base de Datos
+
+### Esquema principal
+
+- `companies` - Empresas registradas
+- `users` - Usuarios del sistema
+- `clients` - Clientes de las empresas
+- `products` - Productos/servicios
+- `invoices` - Facturas electrónicas
+- `invoice_items` - Items de facturas
+- `payments` - Pagos registrados
+
+### Migraciones
+
+Las migraciones se ejecutan automáticamente al iniciar con Docker.
+
+## 🚀 Despliegue en Producción
+
+### 1. Configurar dominio
+
+```bash
+# Actualizar .env
+ALLOWED_ORIGINS=https://tu-dominio.com
+FRONTEND_URL=https://tu-dominio.com
+```
+
+### 2. SSL con Let's Encrypt
+
+```bash
+# Instalar certbot
+sudo apt install certbot
+
+# Obtener certificado
+sudo certbot certonly --standalone -d tu-dominio.com
+
+# Copiar certificados
+sudo cp /etc/letsencrypt/live/tu-dominio.com/fullchain.pem infra/nginx/ssl/
+sudo cp /etc/letsencrypt/live/tu-dominio.com/privkey.pem infra/nginx/ssl/
+```
+
+### 3. Configurar Nginx
+
+Actualizar `infra/nginx/nginx.conf` con tu dominio.
+
+### 4. Cambiar a producción
+
+```bash
+# En .env
+PAYPAL_ENVIRONMENT=production
+HACIENDA_API_URL=https://api.comprobanteselectronicos.go.cr/recepcion/v1
+HACIENDA_TOKEN_URL=https://idp.comprobanteselectronicos.go.cr/auth/realms/rut/protocol/openid-connect/token
+```
+
+## 🧪 Testing
+
+```bash
+# Ejecutar tests
+docker-compose exec backend python -m pytest
+
+# Test de integración Hacienda
+python visual_test_hacienda.py
+
+# Test de polling
+python test_polling.py
+```
+
+## 📞 Soporte
+
+- **Issues**: [GitHub Issues](https://github.com/zonasurtech/factura-cr/issues)
+- **Docs**: Ver carpeta `docs/`
+- **Comunidad**: [Discord/Slack de Zona Sur Tech]
+
+## 📄 Licencia
+
+MIT License - ver LICENSE para más detalles.
 
 ---
 
-## ⚙️ Variables de Entorno
-
-Copia `.env.example` → `.env` y configura:
-
-```env
-# Base de datos (Supabase)
-DATABASE_URL=postgresql+asyncpg://user:pass@db.supabase.co:5432/postgres
-SUPABASE_URL=https://tu-proyecto.supabase.co
-SUPABASE_ANON_KEY=...
-
-# JWT
-SECRET_KEY=cambia-esta-clave-en-produccion
-JWT_ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=1440
-
-# Hacienda CR (Sandbox o Producción)
-HACIENDA_ENV=sandbox
-HACIENDA_USERNAME=usuario@atv.hacienda.go.cr
-HACIENDA_PASSWORD=tu_contraseña_atv
-
-# Certificado BCCR (opcional para sandbox)
-BCCR_P12_PATH=/certs/bccr.p12
-BCCR_P12_PASSWORD=contraseña_p12
-
-# Redis
-REDIS_URL=redis://localhost:6379/0
-```
-
----
-
-## 📋 Clave Hacienda v4.4 — Explicación
-
-La clave de 50 dígitos tiene esta estructura exacta:
-
-```
-[506][DDMMAA][CCCCCCCCCCCC][NNNNNNNNNNNNNNNNNNNN][S][XXXXXXXX]
-  ↑      ↑          ↑                ↑             ↑       ↑
- País  Fecha(6) Cédula(12)   Consecutivo(20)   Sit(1)  Seg(8)
-```
-
-**Consecutivo (20 dígitos):**
-```
-[SSS][TTT][TT][NNNNNNNNNN]
-  ↑    ↑   ↑       ↑
-Suc Terminal Tipo  Número(10)
-```
-
-Tipos de comprobante:
-- `01` = Factura Electrónica (FE)
-- `02` = Nota de Débito (ND)
-- `03` = Nota de Crédito (NC)
-- `04` = Tiquete Electrónico (TE)
-
-Situación:
-- `1` = Normal
-- `2` = Contingencia
-- `3` = Sin Internet
-
----
-
-## 🔐 API Endpoints
-
-### Autenticación
-```
-POST /auth/register   → Crear empresa
-POST /auth/login      → JWT token
-```
-
-### Facturas
-```
-GET  /invoices          → Listar facturas
-POST /invoices          → Crear factura
-GET  /invoices/{id}     → Detalle factura
-POST /invoices/{id}/send   → Enviar a Hacienda
-GET  /invoices/{id}/status → Consultar estado
-GET  /invoices/{id}/pdf    → Descargar PDF
-GET  /invoices/stats       → Estadísticas dashboard
-```
-
-### Clientes y Productos
-```
-GET/POST/PUT/DELETE /clients
-GET/POST/PUT/DELETE /products
-```
-
----
-
-## 🌐 API Hacienda CR — Sandbox
-
-| Servicio | URL |
-|---------|-----|
-| OAuth2 Token | `https://idp.comprobanteselectronicos.go.cr/auth/realms/rut-stag/protocol/openid-connect/token` |
-| Recepción | `https://api-sandbox.comprobanteselectronicos.go.cr/recepcion/v1/recepcion` |
-| Estado | `https://api-sandbox.comprobanteselectronicos.go.cr/recepcion/v1/recepcion/{clave}` |
-| CABYS | `https://api.hacienda.go.cr/fe/cabys` |
-| Tipo Cambio | `https://api.hacienda.go.cr/indicadores/tc` |
-
-**Client ID Sandbox:** `api-stag`  
-**Client ID Producción:** `api-prod`
-
----
-
-## 📄 IVA — Tarifas Costa Rica
-
-| Tarifa | Código | Aplicación |
-|--------|--------|-----------|
-| 13% | `08` | Tarifa general |
-| 8%  | `04` | Restaurantes, seguros privados |
-| 4%  | `03` | Boletos aéreos, servicios médicos |
-| 2%  | `02` | Canasta básica gravada |
-| 1%  | `01` | Tarifa reducida |
-| 0%  | `07` | Exento |
-
----
-
-## 🔧 Stack Tecnológico
-
-**Backend:** FastAPI 0.110 · Python 3.11 · SQLAlchemy 2 · Pydantic 2  
-**Frontend:** Nuxt 3 · Vue 3 · Nuxt UI · TailwindCSS · Chart.js  
-**DB:** Supabase (PostgreSQL) · Redis  
-**Workers:** Celery 5 · Redis broker  
-**Firma:** cryptography · XAdES-BES · .p12 BCCR  
-**PDF:** ReportLab · qrcode  
-**Infra:** Docker · Nginx · Cloudflare  
-
----
-
-## 📖 Referencias Oficiales
-
-- [Estructuras Hacienda CR v4.4](https://www.hacienda.go.cr/docs/Anexosyestructuras.pdf)
-- [API Comprobantes Electrónicos](https://www.hacienda.go.cr/docs/ComprobantesElectronicosAPI.html)
-- [ATV — Administración Tributaria Virtual](https://atv.hacienda.go.cr)
-- [Portal Verificación Hacienda](https://www.hacienda.go.cr/consultahacienda)
-
----
-
-Desarrollado por **Zona Sur Tech** · Costa Rica 🇨🇷
+**Desarrollado por [Zona Sur Tech Hub](https://zonasurtech.online)**

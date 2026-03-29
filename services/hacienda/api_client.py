@@ -46,6 +46,7 @@ ENVIRONMENTS = {
 
 # Cache de tokens en memoria (por usuario@empresa)
 _token_cache: dict[str, dict] = {}
+_token_locks: dict[str, asyncio.Lock] = {}
 
 
 class HaciendaAPIError(Exception):
@@ -90,6 +91,10 @@ class HaciendaClient:
     def _cache_key(self) -> str:
         return f"{self.username}:{self.environment}"
 
+    @property
+    def _lock(self) -> asyncio.Lock:
+        return _token_locks.setdefault(self._cache_key, asyncio.Lock())
+
     @staticmethod
     def xml_to_base64(xml_content: str) -> str:
         """Convierte el contenido XML (string) a Base64 para el envío."""
@@ -106,53 +111,53 @@ class HaciendaClient:
         Returns:
             access_token como string
         """
-        cache = _token_cache.get(self._cache_key)
+        async with self._lock:
+            cache = _token_cache.get(self._cache_key)
 
-        # Verificar si el token en caché sigue siendo válido (margen 60 segundos)
-        if not force_refresh and cache and cache["expires_at"] > time.time() + 60:
-            logger.debug(f"♻️  Token en caché válido para {self.username}")
-            return cache["access_token"]
+            if not force_refresh and cache and cache["expires_at"] > time.time() + 60:
+                logger.debug("♻️  Token en caché válido para ambiente %s", self.environment)
+                return cache["access_token"]
 
-        logger.info(f"[*] Obteniendo token OAuth2 de Hacienda ({self.environment}) para {self.username}")
+            logger.info("[*] Obteniendo token OAuth2 de Hacienda (%s)", self.environment)
 
-        payload = {
-            "grant_type":  "password",
-            "client_id":   self._env["client_id"],
-            "username":    self.username,
-            "password":    self.password,
-        }
+            payload = {
+                "grant_type":  "password",
+                "client_id":   self._env["client_id"],
+                "username":    self.username,
+                "password":    self.password,
+            }
 
-        async with httpx.AsyncClient(timeout=self.timeout) as http:
-            try:
-                resp = await http.post(
-                    self._env["token_url"],
-                    data=payload,
-                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+            async with httpx.AsyncClient(timeout=self.timeout) as http:
+                try:
+                    resp = await http.post(
+                        self._env["token_url"],
+                        data=payload,
+                        headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    )
+                except httpx.ConnectError as e:
+                    raise HaciendaAPIError(0, f"No se pudo conectar al IDP de Hacienda: {e}")
+                except httpx.TimeoutException:
+                    raise HaciendaAPIError(0, "Tiempo de espera agotado al obtener token de Hacienda")
+
+            if resp.status_code != 200:
+                logger.error("❌ Error al obtener token: %s", resp.status_code)
+                raise HaciendaAPIError(
+                    resp.status_code,
+                    "Error de autenticación con Hacienda",
+                    {"response": resp.text[:500]},
                 )
-            except httpx.ConnectError as e:
-                raise HaciendaAPIError(0, f"No se pudo conectar al IDP de Hacienda: {e}")
-            except httpx.TimeoutException:
-                raise HaciendaAPIError(0, "Tiempo de espera agotado al obtener token de Hacienda")
 
-        if resp.status_code != 200:
-            logger.error(f"❌ Error al obtener token: {resp.status_code} — {resp.text}")
-            raise HaciendaAPIError(
-                resp.status_code,
-                "Error de autenticación con Hacienda",
-                {"response": resp.text[:500]},
-            )
+            data         = resp.json()
+            access_token = data["access_token"]
+            expires_in   = data.get("expires_in", 300)
 
-        data         = resp.json()
-        access_token = data["access_token"]
-        expires_in   = data.get("expires_in", 300)  # Default 5 minutos
+            _token_cache[self._cache_key] = {
+                "access_token": access_token,
+                "expires_at":   time.time() + expires_in,
+            }
 
-        _token_cache[self._cache_key] = {
-            "access_token": access_token,
-            "expires_at":   time.time() + expires_in,
-        }
-
-        logger.info("[+] Token obtenido. Expira en {}s".format(data.get("expires_in", "???")))
-        return access_token
+            logger.info("[+] Token obtenido. Expira en %ss", data.get("expires_in", "???"))
+            return access_token
 
     async def send_comprobante(
         self,
@@ -182,16 +187,6 @@ class HaciendaClient:
         Returns:
             Dict con resultado del envío
         """
-        token = await self.get_token()
-
-        # Mapeo tipo comprobante
-        tipo_codes = {
-            "FE": "01", "ND": "02", "NC": "03", "TE": "04",
-            "CCE": "05", "CPCE": "06", "CRCE": "07",
-            "FEE": "08", "FEC": "09"
-        }
-        tipo_code = tipo_codes.get(tipo_comprobante, "01")
-
         payload = {
             "clave":            clave,
             "fecha":            fecha_emision,
@@ -210,54 +205,48 @@ class HaciendaClient:
                 "numeroIdentificacion": "".join(filter(str.isdigit, receptor_cedula)),
             }
 
-        async with httpx.AsyncClient(timeout=self.timeout) as http:
-            try:
-                resp = await http.post(
-                    f"{self._env['api_url']}/recepcion",
-                    json=payload,
-                    headers={
-                        "Authorization": f"Bearer {token}",
-                        "Content-Type":  "application/json",
-                    },
-                )
-            except httpx.ConnectError as e:
-                raise HaciendaAPIError(0, f"No se pudo conectar a la API de Hacienda: {e}")
-            except httpx.TimeoutException:
-                raise HaciendaAPIError(0, "Timeout al enviar comprobante a Hacienda")
+        for attempt in range(2):
+            token = await self.get_token(force_refresh=attempt > 0)
 
-        logger.info("[+] Comprobante enviado | clave: {}... | HTTP: {}".format(clave[:20], resp.status_code))
+            async with httpx.AsyncClient(timeout=self.timeout) as http:
+                try:
+                    resp = await http.post(
+                        f"{self._env['api_url']}/recepcion",
+                        json=payload,
+                        headers={
+                            "Authorization": f"Bearer {token}",
+                            "Content-Type":  "application/json",
+                        },
+                    )
+                except httpx.ConnectError as e:
+                    raise HaciendaAPIError(0, f"No se pudo conectar a la API de Hacienda: {e}")
+                except httpx.TimeoutException:
+                    raise HaciendaAPIError(0, "Timeout al enviar comprobante a Hacienda")
 
-        # 202 = Procesando (éxito normal)
-        if resp.status_code in (200, 202):
-            return {
-                "success":     True,
-                "status_code": resp.status_code,
-                "message":     "Comprobante recibido y en proceso de validación",
-                "hacienda_status": "procesando",
-            }
+            logger.info("[+] Comprobante enviado | clave: %s... | HTTP: %s", clave[:20], resp.status_code)
 
-        # 400 = Error de validación
-        if resp.status_code == 400:
-            try:
-                err = resp.json()
-            except Exception as e:
-                print("\n" + "[ERROR]" + "-"*58)
-                logger.error(f"Fallo en el envio: {e}")
-                print("-"*65 + "\n")
-                err = {"message": resp.text}
-            raise HaciendaAPIError(400, err.get("message", "Error de validación"), err)
+            if resp.status_code in (200, 201, 202):
+                return {
+                    "success":     True,
+                    "status_code": resp.status_code,
+                    "message":     "Comprobante recibido y en proceso de validación",
+                    "hacienda_status": "procesando",
+                }
 
-        # 401 = Token expirado — retry
-        if resp.status_code == 401:
-            logger.warning("Token expirado. Reintentando con token fresco...")
-            token = await self.get_token(force_refresh=True)
-            # Recursive retry (solo una vez)
-            return await self.send_comprobante(
-                clave, fecha_emision, emisor_tipo, emisor_cedula,
-                receptor_tipo, receptor_cedula, tipo_comprobante, xml_b64
-            )
+            if resp.status_code == 400:
+                try:
+                    err = resp.json()
+                except Exception:
+                    err = {"message": resp.text}
+                raise HaciendaAPIError(400, err.get("message", "Error de validación"), err)
 
-        raise HaciendaAPIError(resp.status_code, f"Error inesperado de Hacienda: {resp.text[:200]}")
+            if resp.status_code == 401 and attempt == 0:
+                logger.warning("Token expirado. Reintentando con token fresco...")
+                continue
+
+            raise HaciendaAPIError(resp.status_code, f"Error inesperado de Hacienda: {resp.text[:200]}")
+
+        raise HaciendaAPIError(401, "Autenticación fallida tras reintento")
 
     async def get_comprobante_status(self, clave: str) -> dict:
         """
@@ -274,42 +263,44 @@ class HaciendaClient:
               "raw": {...}             # Respuesta completa de Hacienda
             }
         """
-        token = await self.get_token()
+        for attempt in range(2):
+            token = await self.get_token(force_refresh=attempt > 0)
 
-        async with httpx.AsyncClient(timeout=self.timeout) as http:
+            async with httpx.AsyncClient(timeout=self.timeout) as http:
+                try:
+                    resp = await http.get(
+                        f"{self._env['api_url']}/recepcion/{clave}",
+                        headers={"Authorization": f"Bearer {token}"},
+                    )
+                except httpx.ConnectError as e:
+                    raise HaciendaAPIError(0, f"No se pudo conectar a la API de Hacienda: {e}")
+                except httpx.TimeoutException:
+                    raise HaciendaAPIError(0, "Timeout al consultar estado en Hacienda")
+
+            logger.info("🔍 Estado consultado | clave: %s... | HTTP: %s", str(clave)[:20], resp.status_code)
+
+            if resp.status_code == 404:
+                return {"ind-estado": "no_encontrado", "raw": {}}
+
+            if resp.status_code == 401 and attempt == 0:
+                continue
+
+            if resp.status_code != 200:
+                raise HaciendaAPIError(resp.status_code, f"Error al consultar estado: {resp.text[:200]}")
+
             try:
-                resp = await http.get(
-                    f"{self._env['api_url']}/recepcion/{clave}",
-                    headers={"Authorization": f"Bearer {token}"},
-                )
-            except httpx.ConnectError as e:
-                raise HaciendaAPIError(0, f"No se pudo conectar a la API de Hacienda: {e}")
-            except httpx.TimeoutException:
-                raise HaciendaAPIError(0, "Timeout al consultar estado en Hacienda")
+                data = resp.json()
+            except Exception:
+                data = {"ind-estado": "error_parse", "raw_text": resp.text}
 
-        logger.info(f"🔍 Estado consultado | clave: {str(clave)[:20]}... | HTTP: {resp.status_code}")
+            return {
+                "hacienda_status": data.get("ind-estado", "procesando"),
+                "respuesta_xml":   data.get("respuesta-xml", ""),
+                "mensaje":         data.get("detalle", ""),
+                "raw":             data,
+            }
 
-        if resp.status_code == 404:
-            return {"ind-estado": "no_encontrado", "raw": {}}
-
-        if resp.status_code == 401:
-            token = await self.get_token(force_refresh=True)
-            return await self.get_comprobante_status(clave)
-
-        if resp.status_code != 200:
-            raise HaciendaAPIError(resp.status_code, f"Error al consultar estado: {resp.text[:200]}")
-
-        try:
-            data = resp.json()
-        except Exception:
-            data = {"ind-estado": "error_parse", "raw_text": resp.text}
-
-        return {
-            "hacienda_status": data.get("ind-estado", "procesando"),
-            "respuesta_xml":   data.get("respuesta-xml", ""),
-            "mensaje":         data.get("detalle", ""),
-            "raw":             data,
-        }
+        raise HaciendaAPIError(401, "Autenticación fallida tras reintento")
 
     async def full_pipeline(
         self,

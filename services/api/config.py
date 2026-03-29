@@ -2,6 +2,7 @@
 Configuración global de la aplicación usando Pydantic Settings.
 Lee variables desde el archivo .env en la raíz del servicio.
 """
+from functools import lru_cache
 from pydantic_settings import BaseSettings
 from typing import List
 
@@ -44,11 +45,17 @@ class Settings(BaseSettings):
     MODULE_DASHBOARD_PATH: str = "/dashboard"
     MODULE_AUTH_REPLAY_PREFIX: str = "fac:exchange:jti"
 
-    # ─── Supabase ─────────────────────────────────────────
+    # ─── Neon ───────────────────────────────────────────────────
+    NEON_PROJECT_ID: str = ""
+    NEON_BRANCH_ID: str = "main"
+    NEON_API_KEY: str = ""
+
+    # ─── Supabase (Storage - alternativa) ───────────────────────
     SUPABASE_URL: str = ""
     SUPABASE_SERVICE_ROLE_KEY: str = ""
 
     # ─── Hacienda Costa Rica ──────────────────────────────
+    HACIENDA_ENV: str = "sandbox"
     HACIENDA_API_URL: str = "https://api-sandbox.comprobanteselectronicos.go.cr/recepcion/v1"
     HACIENDA_TOKEN_URL: str = "https://idp.comprobanteselectronicos.go.cr/auth/realms/rut-stag/protocol/openid-connect/token"
     HACIENDA_CLIENT_ID: str = ""
@@ -57,11 +64,21 @@ class Settings(BaseSettings):
     HACIENDA_PASSWORD: str = ""
 
     # ─── Firma Digital ────────────────────────────────────
+    BCCR_P12_PATH: str = "./certs/firma.p12"
+    BCCR_P12_PASSWORD: str = ""
     FIRMA_DIGITAL_PATH: str = "./certs/firma.p12"
     FIRMA_DIGITAL_PIN: str = ""
 
     # ─── Storage ──────────────────────────────────────────
     STORAGE_BUCKET: str = "facturas-pdf"
+
+    # ─── PayPal ───────────────────────────────────────────
+    PAYPAL_CLIENT_ID: str = ""
+    PAYPAL_SECRET: str = ""
+    PAYPAL_MODE: str = "sandbox"  # "sandbox" o "production"
+    
+    # ─── Frontend URLs ────────────────────────────────────
+    FRONTEND_URL: str = "http://localhost:3000"
 
     class Config:
         env_file = "../../.env"
@@ -69,5 +86,9 @@ class Settings(BaseSettings):
         case_sensitive = True
         extra = "ignore"
 
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    return Settings()
 
-settings = Settings()
+
+settings = get_settings()

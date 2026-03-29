@@ -123,8 +123,8 @@ async def send_invoice(
 
         logger.info(f"[send_invoice] HTTP {resp.status_code} | clave={clave[:20]}...")
 
-        # ─── 202 = Recibido y en proceso ─────────────────────────────────────
-        if resp.status_code in (200, 202):
+        # ─── 200/201/202 = Recibido y en proceso ─────────────────────────────
+        if resp.status_code in (200, 201, 202):
             return InvoiceSendResult(
                 success=True, http_status=resp.status_code, clave=clave,
                 hacienda_status="procesando",

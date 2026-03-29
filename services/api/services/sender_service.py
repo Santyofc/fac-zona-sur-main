@@ -2,6 +2,7 @@
 Sender Service — Envía el XML firmado a la API de Hacienda CR (ATV / comprobantes electrónicos).
 Implementa OAuth2 Client Credentials para obtener el token de Hacienda.
 """
+import asyncio
 import httpx
 import base64
 import logging
@@ -11,35 +12,42 @@ from config import settings
 logger = logging.getLogger(__name__)
 
 # Cache simple del token (en producción usar Redis)
-_token_cache = {"token": None, "expires_at": None}
+_token_cache: dict[str, dict] = {}
+_token_locks: dict[str, asyncio.Lock] = {}
 
 
 async def _get_hacienda_token(hacienda_user: str = None, hacienda_pass: str = None) -> str:
     """Obtene un token OAuth2 de Hacienda CR."""
     now = datetime.utcnow()
-    if _token_cache["token"] and _token_cache["expires_at"] and _token_cache["expires_at"] > now.timestamp():
-        return _token_cache["token"]
-
     username = hacienda_user or settings.HACIENDA_USERNAME
     password = hacienda_pass or settings.HACIENDA_PASSWORD
+    cache_key = f"{settings.HACIENDA_ENV}:{username}"
+    lock = _token_locks.setdefault(cache_key, asyncio.Lock())
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        response = await client.post(
-            settings.HACIENDA_TOKEN_URL,
-            data={
-                "grant_type": "password",
-                "client_id": settings.HACIENDA_CLIENT_ID,
-                "client_secret": settings.HACIENDA_CLIENT_SECRET,
-                "username": username,
-                "password": password,
-            },
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
-        response.raise_for_status()
-        data = response.json()
-        _token_cache["token"] = data["access_token"]
-        _token_cache["expires_at"] = now.timestamp() + data.get("expires_in", 300) - 30
-        return _token_cache["token"]
+    async with lock:
+        cached = _token_cache.get(cache_key)
+        if cached and cached["expires_at"] > now.timestamp():
+            return cached["token"]
+
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                settings.HACIENDA_TOKEN_URL,
+                data={
+                    "grant_type": "password",
+                    "client_id": settings.HACIENDA_CLIENT_ID,
+                    "client_secret": settings.HACIENDA_CLIENT_SECRET,
+                    "username": username,
+                    "password": password,
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+            )
+            response.raise_for_status()
+            data = response.json()
+            _token_cache[cache_key] = {
+                "token": data["access_token"],
+                "expires_at": now.timestamp() + data.get("expires_in", 300) - 30,
+            }
+            return _token_cache[cache_key]["token"]
 
 
 async def send_to_hacienda_api(
@@ -94,7 +102,7 @@ async def send_to_hacienda_api(
                 },
             )
 
-            if response.status_code == 202:
+            if response.status_code in (200, 201, 202):
                 return {"estado": "procesando", "mensaje": "Comprobante recibido exitosamente"}
             elif response.status_code == 400:
                 error_data = response.json()

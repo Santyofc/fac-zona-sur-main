@@ -14,6 +14,7 @@ import os
 
 from celery import Celery
 from celery.schedules import crontab
+from sqlalchemy.exc import SQLAlchemyError
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ celery_app.conf.update(
     task_track_started     = True,
     task_acks_late         = True,
     worker_prefetch_multiplier = 1,   # Fair distribution
-    task_max_retries       = 3,
+    task_max_retries       = 5,
     task_default_retry_delay = 30,    # 30 segundos entre reintentos
 )
 
@@ -59,7 +60,7 @@ celery_app.conf.beat_schedule = {
 @celery_app.task(
     bind=True,
     name="tasks.send_invoice_to_hacienda",
-    max_retries=3,
+    max_retries=5,
     default_retry_delay=60,
 )
 def send_invoice_to_hacienda(self, invoice_id: str) -> dict:
@@ -82,6 +83,7 @@ def send_invoice_to_hacienda(self, invoice_id: str) -> dict:
     """
     import asyncio
     from config import get_settings
+    from services.invoice_hacienda_service import RetryableHaciendaError
 
     logger.info(f"[Worker] 🚀 Iniciando envío de factura {invoice_id}")
 
@@ -91,10 +93,15 @@ def send_invoice_to_hacienda(self, invoice_id: str) -> dict:
         logger.info(f"[Worker] ✅ Factura procesada: {invoice_id} → {result.get('status')}")
         return result
 
-    except Exception as exc:
+    except RetryableHaciendaError as exc:
         logger.error(f"[Worker] ❌ Error en factura {invoice_id}: {exc}")
-        # Reintentar con backoff exponencial
         raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+    except SQLAlchemyError as exc:
+        logger.error(f"[Worker] ❌ Error DB en factura {invoice_id}: {exc}")
+        raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+    except Exception as exc:
+        logger.error(f"[Worker] ❌ Error no reintentable en factura {invoice_id}: {exc}")
+        return {"invoice_id": invoice_id, "status": "error", "message": str(exc)}
 
 
 async def _async_process_invoice(invoice_id: str, config) -> dict:

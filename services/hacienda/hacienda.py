@@ -41,6 +41,10 @@ def build_hacienda_client(config) -> HaciendaClient:
     )
 
 
+def _is_production(config) -> bool:
+    return getattr(config, "HACIENDA_ENV", "sandbox") == "production"
+
+
 async def process_invoice(
     invoice_data: dict,
     company_data: dict,
@@ -81,17 +85,21 @@ async def process_invoice(
     }
     doc_type = doc_type_map.get(invoice_data.get("doc_type", "FE"), DocType.FACTURA_ELECTRONICA)
 
-    cedula          = "".join(filter(str.isdigit, company_data["cedula_number"]))
-    sequence_number = invoice_data.get("sequence_number", 1)
+    cedula = "".join(filter(str.isdigit, company_data["cedula_number"]))
+    clave = invoice_data.get("clave")
+    consecutive = invoice_data.get("consecutive")
 
-    clave, consecutive = generate_clave(
-        cedula          = cedula,
-        cedula_type     = company_data.get("cedula_type", "JURIDICA"),
-        sequence_number = sequence_number,
-        doc_type        = doc_type,
-        emission_date   = now,
-        situation       = Situation.NORMAL,
-    )
+    if clave and consecutive:
+        logger.info("📋 Reutilizando clave y consecutivo reservados para la factura")
+    else:
+        sequence_number = invoice_data.get("sequence_number", 1)
+        clave, consecutive = generate_clave(
+            cedula          = cedula,
+            sequence_number = sequence_number,
+            doc_type        = doc_type,
+            emission_date   = now,
+            situation       = Situation.NORMAL,
+        )
 
     fecha_emision = _iso_fecha(now)
     logger.info(f"📋 Clave generada: {clave} | Consecutivo: {consecutive}")
@@ -131,7 +139,12 @@ async def process_invoice(
     p12_path     = getattr(config, "BCCR_P12_PATH", None)
     p12_password = getattr(config, "BCCR_P12_PASSWORD", None)
 
-    signed_xml = sign_xml(xml_str, p12_path, p12_password)
+    signed_xml = sign_xml(
+        xml_str,
+        p12_path,
+        p12_password,
+        allow_unsigned=not _is_production(config),
+    )
     logger.info(f"✍️  XML firmado ({len(signed_xml)} bytes)")
 
     # ─── 5. Base64 ───────────────────────────────────────────────────────────
@@ -152,6 +165,8 @@ async def process_invoice(
     password = getattr(config, "HACIENDA_PASSWORD", None)
 
     if not username or not password:
+        if _is_production(config):
+            raise RuntimeError("HACIENDA_USERNAME/HACIENDA_PASSWORD son obligatorios en producción.")
         logger.warning("⚠️  HACIENDA_USERNAME/PASSWORD no configurados. Omitiendo envío real.")
         result["hacienda_result"] = {
             "hacienda_status": "sandbox_no_sent",

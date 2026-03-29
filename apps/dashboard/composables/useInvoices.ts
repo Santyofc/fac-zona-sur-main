@@ -48,6 +48,23 @@ export function useInvoices() {
     })
   }
 
+  async function updateInvoice(id: string, payload: Record<string, unknown>) {
+    return await $fetch(`/invoices/${id}`, {
+      method: 'PUT',
+      baseURL: apiBase,
+      headers: { ...getHeaders(), 'Content-Type': 'application/json' },
+      body: payload,
+    })
+  }
+
+  async function deleteInvoice(id: string) {
+    return await $fetch(`/invoices/${id}`, {
+      method: 'DELETE',
+      baseURL: apiBase,
+      headers: getHeaders(),
+    })
+  }
+
   async function sendInvoice(id: string) {
     return await $fetch(`/invoices/${id}/send`, {
       method: 'POST',
@@ -63,12 +80,22 @@ export function useInvoices() {
     })
   }
 
+  async function getInvoicePdfUrl(id: string) {
+    return await $fetch(`/invoices/${id}/pdf-url`, {
+      baseURL: apiBase,
+      headers: getHeaders(),
+    })
+  }
+
   return {
     fetchStats,
     fetchInvoices,
     getInvoice,
     createInvoice,
+    updateInvoice,
+    deleteInvoice,
     sendInvoice,
     getInvoiceStatus,
+    getInvoicePdfUrl,
   }
 }

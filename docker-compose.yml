@@ -1,6 +1,28 @@
-version: "3.9"
-
 services:
+  # ─── Inicialización de Base de Datos ──────────────────────────
+  init-db:
+    build:
+      context: ./services/api
+      dockerfile: ../../infra/docker/backend.Dockerfile
+    container_name: factura-cr-init
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - NEON_PROJECT_ID=${NEON_PROJECT_ID}
+      - NEON_API_KEY=${NEON_API_KEY}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+    volumes:
+      - ./scripts:/app/scripts:ro
+      - ./database:/app/database:ro
+      - ./packages/db:/app/packages/db:ro
+    command: ["/bin/bash", "/app/scripts/init-neon.sh"]
+    depends_on:
+      - redis
+    networks:
+      - fcr-network
+    profiles:
+      - init
+
   # ─── Frontend (Nuxt 3 Dashboard) ─────────────────────────────
   frontend:
     build:
@@ -29,18 +51,29 @@ services:
       - "8000:8000"
     environment:
       - DATABASE_URL=${DATABASE_URL}
+      - NEON_PROJECT_ID=${NEON_PROJECT_ID}
+      - NEON_API_KEY=${NEON_API_KEY}
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/1
       - JWT_SECRET=${JWT_SECRET}
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - PAYPAL_CLIENT_ID=${PAYPAL_CLIENT_ID}
+      - PAYPAL_CLIENT_SECRET=${PAYPAL_CLIENT_SECRET}
+      - PAYPAL_ENVIRONMENT=${PAYPAL_ENVIRONMENT:-sandbox}
       - HACIENDA_API_URL=${HACIENDA_API_URL}
       - HACIENDA_TOKEN_URL=${HACIENDA_TOKEN_URL}
+      - HACIENDA_ENV=${HACIENDA_ENV:-sandbox}
       - HACIENDA_CLIENT_ID=${HACIENDA_CLIENT_ID}
       - HACIENDA_CLIENT_SECRET=${HACIENDA_CLIENT_SECRET}
       - HACIENDA_USERNAME=${HACIENDA_USERNAME}
       - HACIENDA_PASSWORD=${HACIENDA_PASSWORD}
+      - BCCR_P12_PATH=${BCCR_P12_PATH:-/app/certs/firma.p12}
+      - BCCR_P12_PASSWORD=${BCCR_P12_PASSWORD}
+      - FIRMA_DIGITAL_PATH=${FIRMA_DIGITAL_PATH:-/app/certs/firma.p12}
+      - FIRMA_DIGITAL_PIN=${FIRMA_DIGITAL_PIN}
       - APP_ENV=production
     depends_on:
       - redis
@@ -59,13 +92,27 @@ services:
     container_name: factura-cr-worker
     environment:
       - DATABASE_URL=${DATABASE_URL}
+      - NEON_PROJECT_ID=${NEON_PROJECT_ID}
+      - NEON_API_KEY=${NEON_API_KEY}
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/1
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - PAYPAL_CLIENT_ID=${PAYPAL_CLIENT_ID}
+      - PAYPAL_CLIENT_SECRET=${PAYPAL_CLIENT_SECRET}
+      - PAYPAL_ENVIRONMENT=${PAYPAL_ENVIRONMENT:-sandbox}
       - HACIENDA_API_URL=${HACIENDA_API_URL}
       - HACIENDA_TOKEN_URL=${HACIENDA_TOKEN_URL}
+      - HACIENDA_ENV=${HACIENDA_ENV:-sandbox}
       - HACIENDA_CLIENT_ID=${HACIENDA_CLIENT_ID}
       - HACIENDA_CLIENT_SECRET=${HACIENDA_CLIENT_SECRET}
+      - HACIENDA_USERNAME=${HACIENDA_USERNAME}
+      - HACIENDA_PASSWORD=${HACIENDA_PASSWORD}
+      - BCCR_P12_PATH=${BCCR_P12_PATH:-/app/certs/firma.p12}
+      - BCCR_P12_PASSWORD=${BCCR_P12_PASSWORD}
+      - FIRMA_DIGITAL_PATH=${FIRMA_DIGITAL_PATH:-/app/certs/firma.p12}
+      - FIRMA_DIGITAL_PIN=${FIRMA_DIGITAL_PIN}
     depends_on:
       - redis
       - backend

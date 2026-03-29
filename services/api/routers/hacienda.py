@@ -1,25 +1,25 @@
 """
 Hacienda Router — Envío y consulta de estado ante el Ministerio de Hacienda CR
 """
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from uuid import UUID
 
+from config import get_settings
 from database import get_db
 from models.models import User, Invoice, HaciendaDocument
 from schemas.schemas import HaciendaStatusResponse
 from routers.deps import get_current_user
-from services.hacienda_service import process_invoice_to_hacienda
+from services.invoice_hacienda_service import InvoiceHaciendaService
 
 router = APIRouter()
 
 
-@router.post("/{invoice_id}/send", response_model=HaciendaStatusResponse)
+@router.post("/{invoice_id}/hacienda/send", response_model=HaciendaStatusResponse)
 async def send_to_hacienda(
     invoice_id: UUID,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -39,44 +39,35 @@ async def send_to_hacienda(
     if not invoice:
         raise HTTPException(status_code=404, detail="Factura no encontrada.")
 
-    if invoice.status not in ("draft", "rejected"):
+    if invoice.status not in ("draft", "rejected", "sent"):
         raise HTTPException(
-            status_code=400,
+            status_code=409,
             detail=f"La factura en estado '{invoice.status}' no puede ser enviada."
         )
 
-    # Create or reset HaciendaDocument
+    if invoice.hacienda_doc and (invoice.hacienda_doc.hacienda_status or "").lower() in ("aceptado", "procesando", "recibido"):
+        raise HTTPException(status_code=409, detail="Ya existe un envío activo o finalizado para esta factura.")
+
+    service = InvoiceHaciendaService(db, get_settings())
+    result = await service.process_invoice(str(invoice_id))
+
+    hacienda_doc = invoice.hacienda_doc or HaciendaDocument(invoice_id=invoice.id, send_attempts=0)
     if not invoice.hacienda_doc:
-        hacienda_doc = HaciendaDocument(invoice_id=invoice.id)
         db.add(hacienda_doc)
-        await db.flush()
-    else:
-        hacienda_doc = invoice.hacienda_doc
-        hacienda_doc.send_attempts = hacienda_doc.send_attempts + 1
-
-    # Change status to processing
-    invoice.status = "processing"
-    await db.commit()
-
-    # Queue background task (Celery / asyncio)
-    background_tasks.add_task(
-        process_invoice_to_hacienda,
-        invoice_id=str(invoice_id),
-    )
 
     return HaciendaStatusResponse(
         invoice_id=invoice.id,
-        status=invoice.status,
-        hacienda_status=hacienda_doc.hacienda_status,
-        hacienda_msg="Factura en procesamiento. Consulte el estado en unos momentos.",
+        status=result.get("status", invoice.status),
+        hacienda_status=result.get("hacienda_status", hacienda_doc.hacienda_status),
+        hacienda_msg=result.get("message", hacienda_doc.hacienda_msg),
         submission_date=hacienda_doc.submission_date,
         response_date=hacienda_doc.response_date,
-        send_attempts=hacienda_doc.send_attempts,
+        send_attempts=hacienda_doc.send_attempts or 0,
         pdf_url=hacienda_doc.pdf_url,
     )
 
 
-@router.get("/{invoice_id}/status", response_model=HaciendaStatusResponse)
+@router.get("/{invoice_id}/hacienda/status", response_model=HaciendaStatusResponse)
 async def get_hacienda_status(
     invoice_id: UUID,
     db: AsyncSession = Depends(get_db),
@@ -109,7 +100,9 @@ async def get_hacienda_status(
         send_attempts=hacienda_doc.send_attempts,
         pdf_url=hacienda_doc.pdf_url,
     )
-@router.post("/{invoice_id}/status/refresh", response_model=HaciendaStatusResponse)
+
+
+@router.post("/{invoice_id}/hacienda/status/refresh", response_model=HaciendaStatusResponse)
 async def refresh_hacienda_status(
     invoice_id: UUID,
     db: AsyncSession = Depends(get_db),
@@ -119,11 +112,22 @@ async def refresh_hacienda_status(
     Forzar una consulta de estado en tiempo real ante Hacienda y actualizar la DB.
     Este endpoint es consumido por el worker de fondo para sincronización masiva.
     """
-    from services.hacienda_service import refresh_invoice_status
-    
-    status_data = await refresh_invoice_status(
-        invoice_id=str(invoice_id),
-        db=db,
+    ownership = await db.execute(
+        select(Invoice.id).where(Invoice.id == invoice_id, Invoice.company_id == current_user.company_id)
     )
-    
-    return HaciendaStatusResponse(**status_data)
+    if ownership.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Factura no encontrada.")
+
+    service = InvoiceHaciendaService(db, get_settings())
+    result = await service.check_status(str(invoice_id))
+
+    return HaciendaStatusResponse(
+        invoice_id=invoice_id,
+        status=result.get("status", "processing"),
+        hacienda_status=result.get("hacienda_status"),
+        hacienda_msg=result.get("message"),
+        submission_date=None,
+        response_date=None,
+        send_attempts=result.get("send_attempts", 0),
+        pdf_url=None,
+    )

@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 
 from database import get_db
 from config import get_settings
-from models.models import User, Invoice, InvoiceItem, Client, Company
+from models.models import User, Invoice, InvoiceItem, Client, Company, HaciendaDocument
 from schemas.schemas import InvoiceCreate, InvoiceResponse, InvoiceListItem, DashboardStats
 from routers.deps import get_current_user
 from services.hacienda.clave import generate_clave, DocType as HaciendaDocType
@@ -274,22 +274,37 @@ async def send_invoice(
     """
     # Verificar ownership
     result = await db.execute(
-        select(Invoice).where(Invoice.id == invoice_id, Invoice.company_id == current_user.company_id)
+        select(Invoice)
+        .options(selectinload(Invoice.hacienda_doc))
+        .where(Invoice.id == invoice_id, Invoice.company_id == current_user.company_id)
+        .with_for_update()
     )
     invoice = result.scalar_one_or_none()
     if not invoice:
         raise HTTPException(status_code=404, detail="Factura no encontrada.")
 
-    if invoice.status in ("accepted", "processing"):
-        raise HTTPException(status_code=400, detail="La factura ya está en proceso o fue aceptada.")
+    if invoice.status == "accepted":
+        raise HTTPException(status_code=409, detail="La factura ya fue aceptada por Hacienda.")
+    if invoice.status == "processing":
+        raise HTTPException(status_code=409, detail="La factura ya está en procesamiento.")
+
+    hac_doc = invoice.hacienda_doc
+    if hac_doc and hac_doc.hacienda_status:
+        normalized_status = hac_doc.hacienda_status.lower()
+        if normalized_status in ("aceptado", "procesando", "recibido"):
+            raise HTTPException(status_code=409, detail="Ya existe un envío activo o finalizado para esta factura.")
 
     # Disparar tarea Celery
     from tasks import send_invoice_to_hacienda
-    send_invoice_to_hacienda.delay(str(invoice_id))
 
-    # Actualizar estado local a 'sent' (o 'processing')
-    invoice.status = "sent"
+    invoice.status = "processing"
+    if not hac_doc:
+        hac_doc = HaciendaDocument(invoice_id=invoice.id, send_attempts=0, hacienda_status="pendiente")
+        db.add(hac_doc)
+        await db.flush()
+
     await db.commit()
+    send_invoice_to_hacienda.delay(str(invoice_id))
 
     return {"message": "Envío iniciado", "invoice_id": invoice_id}
 
@@ -304,6 +319,13 @@ async def get_invoice_hacienda_status(
     Sincroniza y retorna el estado actual de la factura en Hacienda.
     """
     settings = get_settings()
+
+    ownership = await db.execute(
+        select(Invoice.id).where(Invoice.id == invoice_id, Invoice.company_id == current_user.company_id)
+    )
+    if ownership.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Factura no encontrada.")
+
     service = InvoiceHaciendaService(db, settings)
     
     try:
@@ -325,3 +347,101 @@ async def get_invoice_hacienda_status(
             "status": invoice.status,
             "message": "No se pudo sincronizar con Hacienda en este momento."
         }
+
+
+@router.get("/{invoice_id}/pdf-url")
+async def get_invoice_pdf_url(
+    invoice_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Retorna la URL pública del PDF de la factura para descargar.
+    """
+    invoice_result = await db.execute(
+        select(Invoice).where(Invoice.id == invoice_id, Invoice.company_id == current_user.company_id)
+    )
+    invoice = invoice_result.scalar_one_or_none()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Factura no encontrada.")
+    
+    hacienda_doc_result = await db.execute(
+        select(HaciendaDocument).where(HaciendaDocument.invoice_id == invoice_id)
+    )
+    hacienda_doc = hacienda_doc_result.scalar_one_or_none()
+    
+    if not hacienda_doc or not hacienda_doc.pdf_url:
+        raise HTTPException(status_code=404, detail="PDF no disponible aún.")
+    
+    return {"pdf_url": hacienda_doc.pdf_url}
+
+
+@router.put("/{invoice_id}")
+async def update_invoice(
+    invoice_id: UUID,
+    payload: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Actualiza una factura en borrador.
+    Solo se puede editar si está en estado 'draft'.
+    """
+    invoice_result = await db.execute(
+        select(Invoice).where(Invoice.id == invoice_id, Invoice.company_id == current_user.company_id)
+    )
+    invoice = invoice_result.scalar_one_or_none()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Factura no encontrada.")
+    
+    if invoice.status != "draft":
+        raise HTTPException(status_code=400, detail="Solo se pueden editar facturas en estado 'draft'.")
+    
+    # Actualizar campos permitidos
+    allowed_fields = ["client_id", "currency", "notes", "sale_condition", "payment_method", "credit_term_days"]
+    for field in allowed_fields:
+        if field in payload:
+            setattr(invoice, field, payload[field])
+    
+    invoice.updated_at = datetime.utcnow()
+    await db.commit()
+    
+    return InvoiceResponse.from_orm(invoice)
+
+
+@router.delete("/{invoice_id}")
+async def delete_invoice(
+    invoice_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Elimina una factura. Solo se puede eliminar si está en estado 'draft'.
+    """
+    invoice_result = await db.execute(
+        select(Invoice).where(Invoice.id == invoice_id, Invoice.company_id == current_user.company_id)
+    )
+    invoice = invoice_result.scalar_one_or_none()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Factura no encontrada.")
+    
+    if invoice.status != "draft":
+        raise HTTPException(status_code=400, detail="Solo se pueden eliminar facturas en estado 'draft'.")
+    
+    # Eliminar items
+    items_result = await db.execute(select(InvoiceItem).where(InvoiceItem.invoice_id == invoice_id))
+    items = items_result.scalars().all()
+    for item in items:
+        await db.delete(item)
+    
+    # Eliminar documento Hacienda si existe
+    hacienda_doc_result = await db.execute(select(HaciendaDocument).where(HaciendaDocument.invoice_id == invoice_id))
+    hacienda_doc = hacienda_doc_result.scalar_one_or_none()
+    if hacienda_doc:
+        await db.delete(hacienda_doc)
+    
+    # Eliminar factura
+    await db.delete(invoice)
+    await db.commit()
+    
+    return {"message": "Factura eliminada exitosamente"}

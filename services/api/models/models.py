@@ -194,6 +194,7 @@ class HaciendaDocument(Base):
     hacienda_detail = Column(Text)
     response_xml = Column(Text)
     response_date = Column(DateTime(timezone=True))
+    last_attempt_at = Column(DateTime(timezone=True))
     pdf_url = Column(String(500))
     pdf_generated_at = Column(DateTime(timezone=True))
     send_attempts = Column(SmallInteger, nullable=False, default=0)

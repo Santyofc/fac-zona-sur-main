@@ -1,0 +1,43 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: facturador
+      POSTGRES_USER: facturador
+      POSTGRES_PASSWORD: facturador
+    ports:
+      - "5434:5432"
+    volumes:
+      - facturador_pg:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+
+  api:
+    build: .
+    env_file:
+      - .env.example
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
+    volumes:
+      - .:/app
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+      - redis
+
+  worker:
+    build: .
+    env_file:
+      - .env.example
+    command: celery -A app.workers.celery_app.celery_app worker -Q issue_document,check_document_status,send_document_email --loglevel=info
+    volumes:
+      - .:/app
+    depends_on:
+      - postgres
+      - redis
+
+volumes:
+  facturador_pg:

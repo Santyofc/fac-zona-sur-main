@@ -14,6 +14,7 @@ Producción IDP:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
@@ -36,6 +37,7 @@ CLIENT_IDS = {
 
 # Segundos de margen antes de considerar expirado
 TOKEN_EXPIRY_BUFFER = 60
+_token_locks: dict[str, asyncio.Lock] = {}
 
 
 @dataclass
@@ -86,6 +88,10 @@ class AuthService:
             return False
         return self._cached.expires_at > time.time() + TOKEN_EXPIRY_BUFFER
 
+    @property
+    def _lock(self) -> asyncio.Lock:
+        return _token_locks.setdefault(f"{self.environment}:{self.username}", asyncio.Lock())
+
     async def get_access_token(self, force_refresh: bool = False) -> str:
         """
         Retorna el token de acceso vigente.
@@ -101,16 +107,19 @@ class AuthService:
             AuthenticationError: Si las credenciales son inválidas.
             ConnectionError: Si no se puede conectar al IDP.
         """
-        if not force_refresh and self.is_token_valid:
-            logger.debug(f"[AuthService] ♻️  Token en caché válido — expira en "
-                         f"{int(self._cached.expires_at - time.time())}s")
-            return self._cached.access_token
+        async with self._lock:
+            if not force_refresh and self.is_token_valid:
+                logger.debug(
+                    "[AuthService] ♻️  Token en caché válido — expira en %ss",
+                    int(self._cached.expires_at - time.time()),
+                )
+                return self._cached.access_token
 
-        return await self._fetch_new_token()
+            return await self._fetch_new_token()
 
     async def _fetch_new_token(self) -> str:
         """Realiza la petición POST /token al IDP de Hacienda."""
-        logger.info(f"[AuthService] 🔑 Solicitando nuevo token | env={self.environment} | user={self.username}")
+        logger.info("[AuthService] 🔑 Solicitando nuevo token | env=%s", self.environment)
 
         payload = {
             "grant_type": "password",
@@ -136,8 +145,7 @@ class AuthService:
 
         if resp.status_code == 401:
             raise AuthenticationError(
-                f"Credenciales inválidas para el ATV de Hacienda.\n"
-                f"Usuario: {self.username}\n"
+                "Credenciales inválidas para el ATV de Hacienda.\n"
                 f"Respuesta: {resp.text[:300]}"
             )
 

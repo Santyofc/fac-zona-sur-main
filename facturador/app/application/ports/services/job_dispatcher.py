@@ -1,0 +1,9 @@
+from __future__ import annotations
+
+from typing import Protocol
+
+
+class JobDispatcher(Protocol):
+    async def dispatch_issue(self, payload: dict) -> None: ...
+    async def dispatch_check_status(self, payload: dict) -> None: ...
+    async def dispatch_send_email(self, payload: dict) -> None: ...

@@ -71,6 +71,7 @@ def sign_xml(
     xml_string: str,
     p12_path: Optional[str] = None,
     p12_password: Optional[str] = None,
+    allow_unsigned: bool = True,
 ) -> str:
     """
     Firma un XML con el certificado digital .p12 usando XAdES-BES.
@@ -88,6 +89,8 @@ def sign_xml(
     """
     # Modo sandbox: sin certificado
     if not p12_path or not p12_password:
+        if not allow_unsigned:
+            raise RuntimeError("No se puede firmar XML en modo estricto sin certificado .p12 configurado.")
         logger.warning(
             "⚠️  MODO SANDBOX: No se proporcionó certificado digital. "
             "El XML NO está firmado. Solo válido para pruebas en sandbox de Hacienda."
@@ -97,6 +100,8 @@ def sign_xml(
     try:
         return _sign_with_xades(xml_string, p12_path, p12_password)
     except Exception as e:
+        if not allow_unsigned:
+            raise RuntimeError(f"Error al firmar XML en modo estricto: {e}") from e
         logger.error(f"Error al firmar XML: {e}. Retornando XML sin firma (sandbox fallback).")
         return _insert_sandbox_signature(xml_string)
 
